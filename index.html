@@ -271,7 +271,10 @@ table.plist td .na{color:var(--line)}
 .gn.hi{background:var(--accent);color:var(--accent-fg);font-weight:700}
 .fsbox{flex-direction:column;align-items:flex-start}
 .gtag{font-size:11px;border-radius:999px;padding:1px 7px;background:var(--warn-soft);color:var(--warn)}
-.sgrid.stud td.sc{text-align:left;min-width:150px}
+.sgrid.stud td.sc{text-align:left;min-width:120px}
+.sgrid.stud .pair{display:inline-flex;align-items:center;gap:2px;white-space:nowrap}
+.sgrid.stud .sep{color:var(--faint)}
+.sgrid.stud .as{display:inline-flex}
 .sgrid.stud .pt{font-size:11px;color:var(--muted);margin-bottom:2px}
 .sgrid.stud .gn{margin:0}
 .sgrid.stud .as .gn{color:var(--muted);font-weight:400}
@@ -1102,12 +1105,12 @@ function renderStudentGrid(keys){
       if(w.skip){ body+='<tr><td class="nmcol"><b>'+wd(w.date)+'</b></td><td colspan="'+maxN+'" class="note" style="text-align:left">모임 없음'+(w.note?' · '+esc(w.note):'')+'</td></tr>'; return; }
       var s2=w.parts.filter(function(p){ return p.sec===2; }), cells='';
       for(var i=0;i<maxN;i++){ var p=s2[i];
-        cells+='<td class="sc">'+(p?'<div class="pt">'+esc(p.title)+'</div>'+nb(p.main)+(Sx.slotRole(p,'asst')?'<div class="as">'+nb(p.asst)+'</div>':''):'')+'</td>'; }
+        cells+='<td class="sc">'+(p?'<span class="pair">'+nb(p.main)+(Sx.slotRole(p,'asst')&&p.asst?'<span class="sep">·</span><span class="as">'+nb(p.asst)+'</span>':'')+'</span>':'')+'</td>'; }
       body+='<tr><td class="nmcol"><b>'+wd(w.date)+'</b></td>'+cells+'</tr>';
     });
   });
-  var h='<p class="hint">'+(hi?'<b>'+esc(nameOf(hi))+'</b> · 이 기간 학생 과제 '+cnt+'번 · 다시 누르면 표시가 꺼져요':'봉사 파트(학생 과제·보조자·학생 연설)만 따로 모았어요. 위가 학생, 아래가 보조자예요. 이름을 누르면 그 사람 칸이 모두 표시돼요.')+'</p>';
-  var head=''; for(var i=1;i<=maxN;i++) head+='<th>봉사 파트 '+(i+3)+'</th>';
+  var h='<p class="hint">'+(hi?'<b>'+esc(nameOf(hi))+'</b> · 이 기간 학생 과제 '+cnt+'번 · 다시 누르면 표시가 꺼져요':'학생 과제만 따로 모았어요. 칸마다 왼쪽이 학생, 오른쪽(흐린 글씨)이 보조자예요. 이름을 누르면 그 사람 칸이 모두 표시돼요.')+'</p>';
+  var head=''; for(var i=1;i<=maxN;i++) head+='<th>과제 '+(i+3)+'번</th>';
   return h+'<div class="tablewrap"><table class="stat sgrid stud"><thead><tr><th class="nmcol">날짜</th>'+head+'</tr></thead><tbody>'+body+'</tbody></table></div>';
 }
 
