@@ -1353,12 +1353,20 @@ function regroupMonths(){
 function monthAfterToday(){ var t=new Date(), y=t.getFullYear(), m=t.getMonth()+2; if(m>12){ m=1; y++; } return y+'-'+('0'+m).slice(-2); }
 
 function applyImport(weeks){
-  var n=0;
+  var n=0, newMonths={};
   weeks.forEach(function(wk){
-    var k=mondayKey(wk.date).slice(0,7); var M=D.months[k]||(D.months[k]={weeks:[]});
+    var k=mondayKey(wk.date).slice(0,7); if(!D.months[k]) newMonths[k]=1; var M=D.months[k]||(D.months[k]={weeks:[]});
     var at=-1; M.weeks.forEach(function(w,i){ if(mondayKey(w.date)===mondayKey(wk.date)) at=i; });
     if(at>=0) M.weeks[at]=wk; else M.weeks.push(wk);
     M.weeks.sort(function(a,b){ return a.date<b.date?-1:1; }); M.ready=true; n++;
+  });
+  // 파일로 새로 생긴 달: 파일에 없는 앞으로의 주는 채워서 빈칸만 자동 배정 (파일에 있는 주는 그대로)
+  var t=today();
+  Object.keys(newMonths).forEach(function(k){
+    var M=D.months[k], pk=k.split('-'), full=Sx.makeMonth(+pk[0],+pk[1],D.settings.weekday), added=0;
+    full.weeks.forEach(function(fw){ if(fw.date<t) return; if(M.weeks.some(function(w){ return mondayKey(w.date)===mondayKey(fw.date); })) return;
+      var pg=progFor(fw); if(pg) applyProgram(fw,pg); M.weeks.push(fw); added++; });
+    if(added){ M.weeks.sort(function(a,b){ return a.date<b.date?-1:1; }); Sx.autoAssign(D,k,{keepFilled:true}); }
   });
   return n;
 }
@@ -1483,7 +1491,8 @@ function renderImport(){
   if(!start && pv){
     if(!pv.weeks.length) h+='<div class="callout warn">임명표를 찾지 못했어요. “사회”, “마치는 기도” 같은 파트 이름과 날짜(예: 11/3)가 들어 있는 표를 복사했는지 확인해 주세요.</div>';
     else {
-      var exist=pv.weeks.filter(function(w){ var M=D.months[w.date.slice(0,7)]; return M && M.weeks.some(function(x){ return x.date===w.date; }); }).length;
+      var tdy=today(), sameWk=function(w){ var M=D.months[mondayKey(w.date).slice(0,7)]; return M && M.weeks.some(function(x){ return mondayKey(x.date)===mondayKey(w.date); }); };
+      var exist=pv.weeks.filter(function(w){ return sameWk(w) && w.date<tdy; }).length, existF=pv.weeks.filter(function(w){ return sameWk(w) && w.date>=tdy; }).length, futureN=pv.weeks.filter(function(w){ return w.date>=tdy; }).length;
       h+='<div class="callout" style="flex-direction:column;align-items:flex-start"><b>'+pv.weeks.length+'주를 찾았어요 · '+wd(pv.weeks[0].date)+' ~ '+wd(pv.weeks[pv.weeks.length-1].date)+' ('+pv.weeks[0].date.slice(0,4)+'년)</b>'+
         '<span>이름 '+pv.total+'칸 중 '+pv.matched+'칸이 명단과 연결됐어요.</span>'+
         (pv.unknown.length?(function(){ var pp=pv.unknown.filter(isNameLike), junk=pv.unknown.filter(function(n){ return !isNameLike(n); });
@@ -1491,7 +1500,8 @@ function renderImport(){
             '<label class="note" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="impAddLive"'+(I.addLive?' checked':'')+'> 이 사람들을 지금 명단에도 넣기 (지금도 있는 사람이면 체크)</label>':'')+
             (junk.length?'<span style="color:var(--warn)">이름으로 보기 어려운 글자 '+junk.length+'개: '+esc(junk.slice(0,10).join(', '))+' — 글자 그대로 들어가요. 틀리게 읽힌 것이면 위 칸에서 고쳐 주세요.</span>':''); })():'')+
         (Object.keys(pv.fuzzy||{}).length?'<span>비슷한 이름으로 연결: '+esc(Object.keys(pv.fuzzy).map(function(k){ return k+'→'+pv.fuzzy[k]; }).join(', '))+'</span>':'')+
-        (exist?'<span>이미 있는 '+exist+'주는 가져온 내용으로 바뀌어요.</span>':'')+'</div>';
+        (futureN?'<span>이 중 <b>앞으로의 주 '+futureN+'주</b>는 미리 짜 둔 계획으로 그대로 넣어요.'+(existF?' 여기서 자동으로 짜 둔 '+existF+'주는 파일 내용으로 바뀌어요.':'')+'</span>':'')+
+        (exist?'<span>이미 있는 지난 '+exist+'주도 가져온 내용으로 바뀌어요.</span>':'')+'</div>';
       h+='<div class="hist">'+pv.weeks.map(function(w){ var ch=w.parts[0]; return '<span>'+wd(w.date)+' 사회 '+esc(nameOf(ch.main)||'-')+'</span>'; }).join('')+'</div>';
     }
   }
