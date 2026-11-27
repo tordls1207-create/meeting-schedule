@@ -521,7 +521,7 @@ textarea.copy{width:100%;height:220px;font-size:12px;border:1px solid var(--line
     if (!month) return { filled: 0, empty: 0 };
     var rng = mulberry32(opts.seed != null ? opts.seed : Date.now() % 2147483647);
     month.weeks.forEach(function (w) {
-      if (w.skip) return;
+      if (w.skip || opts.keepFilled) return;
       w.parts.forEach(function (p) {
         ['main', 'asst'].forEach(function (slot) {
           if (slotRole(p, slot) && !(p.lock && p.lock[slot])) p[slot] = null;
@@ -604,6 +604,50 @@ function toast(msg){ var t=document.createElement('div'); t.className='toast'; t
 function weeksAgo(d, ref){ var n=Math.round(Sx.daysBetween(d, ref)/7); return n<=0?'이번 주':n+'주 전'; }
 
 /* ---------- 불러오기 / 저장 ---------- */
+/* 교재 파트 자동 반영 (주마다 GitHub에서 받아 둔 파트 이름·시간) */
+var PROG_URL='https://tordls1207-create.github.io/meeting-schedule/programs.json';
+var PROG=null;
+function mondayKey(d){ var t=new Date(d+'T00:00:00Z'); t.setUTCDate(t.getUTCDate()-((t.getUTCDay()+6)%7)); return t.toISOString().slice(0,10); }
+function progFor(w){ return (PROG && PROG[mondayKey(w.date)]) || null; }
+function s2Kind(name){ var pre=S2_PRESETS.filter(function(x){return x[0]===name})[0]; var who=pre?pre[2]:(/연설/.test(name)?'talk':'pair'); return who==='talk'?'studentTalk':'demo'; }
+function applyProgram(w, pg){
+  var old=w.parts.slice(), used=[];
+  var take=function(pred){ for(var i=0;i<old.length;i++){ if(used.indexOf(i)<0 && pred(old[i])){ used.push(i); return old[i]; } } return null; };
+  var keep=function(kind){ return take(function(p){ return p.kind===kind; }); };
+  var out=[keep('chair')||Sx.makePart('chair','사회')];
+  [['talk','연설'],['gems','영적 보물 찾기'],['reading','성경 낭독']].forEach(function(x,i){
+    var p=keep(x[0])||Sx.makePart(x[0],x[1]); p.title=joinTitle(x[1], (pg.s1&&pg.s1[i])||splitTitle(p.title).min); out.push(p); });
+  (pg.s2||[]).forEach(function(it){ var kind=s2Kind(it[0]);
+    var p=take(function(q){ return q.sec===2 && q.kind===kind; })||Sx.makePart(kind,'',2); p.title=joinTitle(it[0],it[1]); p.noAsst=false; out.push(p); });
+  (pg.s3||[]).forEach(function(it){
+    var p=take(function(q){ return q.kind==='living'; })||Sx.makePart('living','',3); p.title=joinTitle(it[0],it[1]); out.push(p); });
+  if(pg.co){ var c=take(isCoPart)||Sx.makePart('manual','봉사 강연 (30분)',3); c.title=joinTitle(pg.co[0],pg.co[1]||30); out.push(c); if(!w.note) w.note='순회 감독자 방문'; }
+  else { var b=keep('cbs')||Sx.makePart('cbs','회중 성서 연구 (30분)'); b.title=joinTitle('회중 성서 연구', pg.cbs||30); out.push(b); }
+  out.push(keep('prayer')||Sx.makePart('prayer','마치는 기도'));
+  w.parts=out; w.prog=mondayKey(w.date);
+}
+// 아직 교재를 반영하지 않은 앞으로의 주에 적용. 직접 고친 주와 확정한 달은 건드리지 않음
+function applyProgramsToMonth(k, onlyNew){
+  var M=D.months[k], n=0, t=today();
+  if(!M || !PROG) return 0;
+  if(onlyNew && monthState(M).confirmed) return 0;
+  M.weeks.forEach(function(w){
+    if(w.skip || w.edited) return;
+    if(onlyNew && (w.date<t || w.prog===mondayKey(w.date))) return;
+    var pg=progFor(w); if(!pg) return;
+    applyProgram(w,pg); n++;
+  });
+  if(n && M.weeks.every(function(w){ return w.skip || w.prog || w.edited; })) M.ready=true;
+  return n;
+}
+async function loadPrograms(){
+  try{ var r=await fetch(PROG_URL,{cache:'no-cache'}); if(!r.ok) return; var j=await r.json(); PROG=j.weeks||null; }catch(e){ return; }
+  if(!PROG || !livePeople().length) return;
+  var total=0;
+  monthKeys().forEach(function(k){ var n=applyProgramsToMonth(k,true); if(n){ total+=n; Sx.autoAssign(D,k,{keepFilled:true}); } });
+  if(total){ changed(); render(); toast('교재 내용으로 '+total+'주의 파트를 맞췄어요'); }
+}
+
 async function load(){
   var remote=null, local=null;
   try{ var r=await fetch('data.json',{cache:'no-store'}); if(r.ok) remote=await r.json(); }catch(e){}
@@ -617,6 +661,7 @@ async function load(){
   ui.month = keys[keys.length-1] || null;
   render();
   initCaps(dirty);
+  loadPrograms();
 }
 async function initCaps(dirty){
   if(!window.claude || !window.claude.use){ save.mode='local'; setStatus(); return; }
@@ -818,6 +863,8 @@ function renderWeekEditor(){
   var h='<div class="ov" data-act="closeWed"><div class="sheet wide" data-stop="1" role="dialog" aria-modal="true" aria-label="파트 맞추기">';
   h+='<header><h3>'+md(w.date)+' 파트 맞추기 <span class="note" style="font-weight:500">'+(wi+1)+' / '+M.weeks.length+'주</span></h3><p>생활과 봉사 집회 교재의 이 주 프로그램과 똑같이 맞춰 주세요. 고친 내용은 바로 저장돼요.</p></header>';
   h+='<div class="wedbody">';
+  var pgW=progFor(w);
+  if(pgW) h+='<div class="callout" style="margin:0"><span>'+(w.edited?'직접 고친 주예요. 교재 내용으로 되돌리려면 누르세요.':'교재 내용이 자동으로 반영된 주예요.')+'</span>'+(w.edited||w.prog!==mondayKey(w.date)?'<button class="btn" data-act="wedProg">교재대로 맞추기</button>':'')+'</div>';
   h+='<div class="frow"><label for="wedDate">날짜</label><input type="date" id="wedDate" data-act="wedDate" value="'+w.date+'"></div>';
   h+='<div class="frow"><span class="lab">이 주는</span><span class="seg gseg">'+[['normal','보통 주'],['co','순회 감독자 방문'],['none','모임 없음']].map(function(t){
     return '<button data-act="wedType" data-v="'+t[0]+'" aria-pressed="'+(type===t[0])+'">'+t[1]+'</button>'; }).join('')+'</span></div>';
@@ -1264,6 +1311,7 @@ document.addEventListener('click', function(ev){
     if(ev.target.closest('[data-stop]') && el.classList.contains('ov')) return;
   }
   var a=el.dataset.act, M=ui.month&&D.months[ui.month], x, i;
+  if(/^wed(Type|Who|Del|Add)$/.test(a) && ui.wed!=null && M && M.weeks[ui.wed]) M.weeks[ui.wed].edited=true;
   switch(a){
     case 'tab': ui.tab=el.dataset.v; ui.confirm=null; ui.justAdded=null; ui.wed=null; if(ui.tab!=='people') ui.started=false; break;
     case 'dgroup': ui.draft[+el.dataset.i].group=el.dataset.v; break;
@@ -1280,7 +1328,7 @@ document.addEventListener('click', function(ev){
       ui.justAdded={}; newP.forEach(function(q){ ui.justAdded[q.id]=1; });
       if(welcome){
         // 명단을 넣으면 바로 다음 달 계획표 만들기로 넘어감
-        if(!monthKeys().length){ var k1=nextMonthKey(), p1=k1.split('-'); D.months[k1]=Sx.makeMonth(+p1[0],+p1[1],D.settings.weekday); }
+        if(!monthKeys().length){ var k1=nextMonthKey(), p1=k1.split('-'); D.months[k1]=Sx.makeMonth(+p1[0],+p1[1],D.settings.weekday); applyProgramsToMonth(k1,false); }
         ui.month=monthKeys().slice(-1)[0]; ui.tab='plan'; ui.wed=null; ui.confirm=null;
         var rr=Sx.autoAssign(D, ui.month, {});
         changed(); toast(rows.length+'명으로 '+mlabel(ui.month)+' 계획표를 만들었어요'+(rr.empty?' · 맡을 사람이 없어 '+rr.empty+'칸이 비었어요':'')); break;
@@ -1302,6 +1350,7 @@ document.addEventListener('click', function(ev){
     case 'closeWed': ui.wed=null; ui.confirm=null; break;
     case 'wedPrev': if(ui.wed>0) ui.wed--; ui.confirm=null; ui.wedCustom=null; break;
     case 'wedNext': if(ui.wed<M.weeks.length-1) ui.wed++; ui.confirm=null; ui.wedCustom=null; break;
+    case 'wedProg': var wp=wedWeek(); applyProgram(wp,progFor(wp)); wp.edited=false; wp.skip=false; Sx.autoAssign(D,ui.month,{keepFilled:true}); changed(); toast('교재대로 맞췄어요'); break;
     case 'wedDone': M.ready=true; ui.wed=null; changed(); toast('파트를 다 맞췄어요. 이제 “자동 배정”을 누르세요'); break;
     case 'wedType': setWeekType(wedWeek(), el.dataset.v); changed(); break;
     case 'wedWho':
@@ -1322,9 +1371,10 @@ document.addEventListener('click', function(ev){
     case 'addMonth':
       var k=nextMonthKey(), pp=k.split('-');
       D.months[k]=Sx.makeMonth(+pp[0],+pp[1],D.settings.weekday);
+      var pa=applyProgramsToMonth(k,false);
       ui.month=k; ui.wed=null; ui.confirm=null;
       var ra=Sx.autoAssign(D, k, {});
-      changed(); toast(mlabel(k)+' 계획표를 만들었어요'+(ra.empty?' · 맡을 사람이 없어 '+ra.empty+'칸이 비었어요':'')); break;
+      changed(); toast(mlabel(k)+' 계획표를 만들었어요'+(pa?' · 교재 파트 '+pa+'주 반영':'')+(ra.empty?' · 맡을 사람이 없어 '+ra.empty+'칸이 비었어요':'')); break;
     case 'planMore': ui.planMore=!ui.planMore; break;
     case 'auto':
       var r=Sx.autoAssign(D, ui.month, {});
@@ -1426,6 +1476,7 @@ document.addEventListener('click', function(ev){
 document.addEventListener('change', function(ev){
   var el=ev.target, a=el.dataset&&el.dataset.act; if(!a) return;
   var M=ui.month&&D.months[ui.month], o;
+  if(/^wed(Title|Min|S2name|CoName)$/.test(a) && ui.wed!=null && M && M.weeks[ui.wed]) M.weeks[ui.wed].edited=true;
   switch(a){
     case 'ptitle': o=curWeekPart(el); o.p.title=el.value; changed(); return;
     case 'ptext': o=curWeekPart(el); o.p.text=el.value; changed(); return;
