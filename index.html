@@ -260,6 +260,9 @@ table.plist th.rc,table.plist td.rc{text-align:center;padding:4px 3px;font-size:
 .rt{width:26px;height:26px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--accent);font-weight:700;padding:0;line-height:1}
 .rt[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent)}
 table.plist td .na{color:var(--line)}
+.sheet.confirm{max-width:400px}
+.sheet.confirm header p{font-size:13px;line-height:1.55;margin-top:6px}
+.btn.danger-fill{background:var(--warn);border-color:var(--warn);color:var(--surface);font-weight:700}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;z-index:60}
 textarea.copy{width:100%;height:220px;font-size:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:8px}
 @media (prefers-reduced-motion:no-preference){.nm,.chip,.btn,.cand{transition:background-color .12s,border-color .12s}}
@@ -731,6 +734,7 @@ function render(){
   else h+=renderSettings();
   if(ui.picker) h+=renderPicker();
   if(ui.exportText!=null) h+=renderExport();
+  if(ui.modal && ui.tab==='plan' && ui.month && D.months[ui.month]) h+=renderModal();
   if(ui.wed!=null && ui.tab==='plan' && D.months[ui.month] && D.months[ui.month].weeks[ui.wed]) h+=renderWeekEditor();
   var sx=window.scrollX, sy=window.scrollY;
   var fid = document.activeElement && document.activeElement.id;
@@ -789,10 +793,8 @@ function renderPlan(){
       (STANDALONE?'':'<p class="note" style="margin:8px 0 0">이 화면에서는 바로 인쇄가 안 돼요. PDF로 저장한 뒤 그 파일을 인쇄하세요.</p>')+'</section>';
   }
   h+='<div class="planfoot"><button class="addline" data-act="addWeek">＋ 이 달에 주 추가</button><span class="spacer"></span>';
-  if(ui.confirm==='clearMonth') h+='<button class="btn danger" data-act="clearMonthYes">배정 모두 비우기 확인</button><button class="btn" data-act="cancel">취소</button>';
-  else if(st.filled) h+='<button class="btn" data-act="clearMonth">배정 모두 비우기</button>';
-  if(ui.confirm==='delMonth') h+='<button class="btn danger" data-act="delMonthYes">'+mlabel(ui.month)+' 전체 삭제 확인</button><button class="btn" data-act="cancel">취소</button>';
-  else h+='<button class="btn danger" data-act="delMonth">이 달 삭제</button>';
+  h+='<button class="btn" data-act="clearMonth"'+(st.filled?'':' disabled title="비울 배정이 없어요"')+'>배정 모두 비우기</button>';
+  h+='<button class="btn danger" data-act="delMonth">이 달 삭제</button>';
   h+='</div>';
   return h;
 }
@@ -986,6 +988,15 @@ function renderPicker(){
   h+='<label class="note" style="display:flex;gap:4px;align-items:center"><input type="checkbox" data-act="showAll"'+(ui.showAll?' checked':'')+'> 자격 없는 사람도 보기</label>';
   h+='<span class="spacer"></span><button class="btn" data-act="closePicker">닫기</button></footer></div></div>';
   return h;
+}
+// 한 번 더 묻는 창
+function renderModal(){
+  var M=D.months[ui.month], st=monthState(M), m;
+  if(ui.modal==='clearMonth') m={t:mlabel(ui.month)+' 배정을 모두 비울까요?', d:'배정된 '+st.filled+'칸의 이름이 모두 지워지고, 📌 고정과 직접 정한 시작 기도도 풀려요. 파트 구성은 그대로 남아요.', yes:'clearMonthYes', yl:'모두 비우기'};
+  else m={t:mlabel(ui.month)+'을 삭제할까요?', d:'이 달의 파트 구성과 배정이 모두 없어지고 되돌릴 수 없어요.', yes:'delMonthYes', yl:'삭제하기'};
+  return '<div class="ov" data-act="closeModal"><div class="sheet confirm" data-stop="1" role="alertdialog" aria-modal="true" aria-labelledby="mdT">'+
+    '<header><h3 id="mdT">'+esc(m.t)+'</h3><p>'+esc(m.d)+'</p></header>'+
+    '<footer><span class="spacer"></span><button class="btn" data-act="closeModal" id="mdNo">취소</button><button class="btn danger-fill" data-act="'+m.yes+'">'+esc(m.yl)+'</button></footer></div></div>';
 }
 function renderExport(){
   return '<div class="ov" data-act="closeExport"><div class="sheet" data-stop="1" role="dialog" aria-label="텍스트"><header><h3>'+mlabel(ui.month)+' 텍스트</h3><p>복사해서 카카오톡이나 문자로 보내세요</p></header>'+
@@ -1341,7 +1352,7 @@ function curWeekPart(el){ var M=D.months[ui.month]; var w=M.weeks[+el.dataset.w]
 
 document.addEventListener('click', function(ev){
   var el=ev.target.closest('[data-act]'); if(!el) return;
-  if(el.dataset.act==='closePicker' || el.dataset.act==='closeExport' || el.dataset.act==='closeWed'){
+  if(el.dataset.act==='closePicker' || el.dataset.act==='closeExport' || el.dataset.act==='closeWed' || el.dataset.act==='closeModal'){
     if(ev.target.closest('[data-stop]') && el.classList.contains('ov')) return;
   }
   var a=el.dataset.act, M=ui.month&&D.months[ui.month], x, i;
@@ -1426,12 +1437,13 @@ document.addEventListener('click', function(ev){
     case 'statSort': var sv=el.dataset.v; if(ui.stat.sort===sv) ui.stat.dir=-ui.stat.dir; else { ui.stat.sort=sv; ui.stat.dir=sv==='name'?1:-1; } break;
     case 'statRow': ui.stat.open=ui.stat.open===el.dataset.v?null:el.dataset.v; break;
     case 'statZero': ui.stat.zeroOpen=!ui.stat.zeroOpen; break;
-    case 'delMonth': ui.confirm='delMonth'; break;
-    case 'clearMonth': ui.confirm='clearMonth'; break;
-    case 'clearMonthYes':
+    case 'delMonth': ui.modal='delMonth'; break;
+    case 'clearMonth': ui.modal='clearMonth'; break;
+    case 'closeModal': ui.modal=null; break;
+    case 'clearMonthYes': ui.modal=null;
       M.weeks.forEach(function(w){ w.parts.forEach(function(p){ p.main=null; p.asst=null; p.openPrayer=null; p.lock={main:false,asst:false}; }); });
       ui.confirm=null; changed(); toast(mlabel(ui.month)+' 배정을 모두 비웠어요. “자세히 보기”의 자동 배정으로 다시 채울 수 있어요'); break;
-    case 'delMonthYes': delete D.months[ui.month]; ui.month=monthKeys().slice(-1)[0]||null; ui.confirm=null; changed(); break;
+    case 'delMonthYes': ui.modal=null; delete D.months[ui.month]; ui.month=monthKeys().slice(-1)[0]||null; ui.confirm=null; changed(); break;
     case 'cancel': ui.confirm=null; break;
     case 'pick': ui.picker={w:+el.dataset.w,p:+el.dataset.p,s:el.dataset.s}; ui.showAll=false; render(); var pqi=document.getElementById('pq'); if(pqi && window.matchMedia && window.matchMedia('(pointer:fine)').matches) pqi.focus(); filterCands(); return;
     case 'closePicker': ui.picker=null; break;
@@ -1605,7 +1617,7 @@ document.addEventListener('keydown', function(ev){
     if(i===ui.draft.length-1){ ui.draft.push({name:'',group:null}); render(); }
     var nx=document.getElementById('dn'+(i+1)); if(nx) nx.focus(); return;
   }
-  if(ev.key==='Escape' && (ui.picker||ui.exportText!=null||ui.wed!=null)){ ui.picker=null; ui.exportText=null; ui.wed=null; render(); }
+  if(ev.key==='Escape' && (ui.picker||ui.exportText!=null||ui.wed!=null||ui.modal)){ ui.picker=null; ui.exportText=null; ui.wed=null; ui.modal=null; render(); }
   if(ev.key==='Enter' && ev.target.id==='newName'){ var b=document.querySelector('[data-act="addPerson"][data-g="M"]'); if(b) b.click(); }
   if(ev.key==='Enter' && ev.target.id==='manualName'){ var s=document.querySelector('[data-act="manualSave"]'); if(s) s.click(); }
 });
