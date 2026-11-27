@@ -677,14 +677,17 @@ function mondayKey(d){ var t=new Date(d+'T00:00:00Z'); t.setUTCDate(t.getUTCDate
 function progFor(w){ return (PROG && PROG[mondayKey(w.date)]) || null; }
 function s2Kind(name){ var pre=S2_PRESETS.filter(function(x){return x[0]===name})[0]; var who=pre?pre[2]:(/연설/.test(name)?'talk':'pair'); return who==='talk'?'studentTalk':'demo'; }
 // 생활 파트 제목: 주제 대신 형식만 (예: 토의 (15분), 동영상 및 토의 (15분)), 회중의 필요는 그대로
-function livingTitle(it){ var nm=String(it[0]||''); return joinTitle(/회중의\s*필요/.test(nm)?'회중의 필요':(it[2]||'토의'), it[1]); }
+function useThemes(){ return !!D.settings.themes; }
+function talkTitle(pg){ var min=(pg.s1&&pg.s1[0])||10; return joinTitle(useThemes()&&pg.t1?pg.t1:'연설', min); }
+function livingTitle(it){ if(useThemes() && it[0] && !/회중의\s*필요/.test(String(it[0]))) return joinTitle(String(it[0]), it[1]); return livingTitleFmt(it); }
+function livingTitleFmt(it){ var nm=String(it[0]||''); return joinTitle(/회중의\s*필요/.test(nm)?'회중의 필요':(it[2]||'토의'), it[1]); }
 function applyProgram(w, pg){
   var old=w.parts.slice(), used=[];
   var take=function(pred){ for(var i=0;i<old.length;i++){ if(used.indexOf(i)<0 && pred(old[i])){ used.push(i); return old[i]; } } return null; };
   var keep=function(kind){ return take(function(p){ return p.kind===kind; }); };
   var out=[keep('chair')||Sx.makePart('chair','사회')];
   [['talk','연설'],['gems','영적 보물 찾기'],['reading','성경 낭독']].forEach(function(x,i){
-    var p=keep(x[0])||Sx.makePart(x[0],x[1]); p.title=joinTitle(x[1], (pg.s1&&pg.s1[i])||splitTitle(p.title).min); out.push(p); });
+    var p=keep(x[0])||Sx.makePart(x[0],x[1]); p.title=i===0?talkTitle(pg):joinTitle(x[1], (pg.s1&&pg.s1[i])||splitTitle(p.title).min); out.push(p); });
   (pg.s2||[]).forEach(function(it){ var kind=s2Kind(it[0]);
     var p=take(function(q){ return q.sec===2 && q.kind===kind; })||Sx.makePart(kind,'',2); p.title=joinTitle(it[0],it[1]); p.noAsst=false; out.push(p); });
   (pg.s3||[]).forEach(function(it){
@@ -706,7 +709,7 @@ function applyProgramsToMonth(k, onlyNew){
     if(onlyNew && w.prog===mondayKey(w.date)){
       // 이미 맞춘 주: 제목만 새 방식으로 바꿈 (배정은 그대로)
       var ch=false, tk=w.parts.filter(function(q){return q.kind==='talk'})[0];
-      if(tk){ var nt=joinTitle('연설',(pg.s1&&pg.s1[0])||10); if(tk.title!==nt){ tk.title=nt; ch=true; } }
+      if(tk){ var nt=talkTitle(pg); if(tk.title!==nt){ tk.title=nt; ch=true; } }
       var lv=w.parts.filter(function(q){return q.kind==='living'});
       (pg.s3||[]).forEach(function(it,k){ if(lv[k]){ var lt=livingTitle(it); if(lv[k].title!==lt){ lv[k].title=lt; ch=true; } } });
       if(ch) n++;
@@ -915,6 +918,7 @@ function renderPlan(){
       (STANDALONE?'':'<p class="note" style="margin:8px 0 0">이 화면에서는 바로 인쇄가 안 돼요. PDF로 저장한 뒤 그 파일을 인쇄하세요.</p>')+'</section>';
   }
   h+='<div class="planfoot"><button class="addline" data-act="addWeek">＋ 이 달에 주 추가</button><span class="spacer"></span>';
+  h+='<label class="opcb note"><input type="checkbox" id="planThemeCb" data-act="themeCb"'+(useThemes()?' checked':'')+'> 연설·토의 주제 제목 쓰기</label>';
   h+='<label class="opcb note"><input type="checkbox" id="planOpenCb" data-act="openSepCb"'+(D.settings.openPrayer==='separate'?' checked':'')+'> 시작 기도 따로 배정</label>';
   h+='<button class="btn primary" data-act="auto">'+(st.filled?'자동 배정 다시 하기':'자동 배정하기')+'</button>';
   h+='<button class="btn" data-act="clearMonth"'+(st.filled?'':' disabled title="비울 배정이 없어요"')+'>배정 모두 비우기</button>';
@@ -1512,6 +1516,16 @@ function setOpenMode(mode, announce){
   changed();
   if(announce) toast(mode==='separate'?'시작 기도를 따로 배정해요'+(n?' · 앞으로의 '+n+'개 달에 채웠어요':''):'시작 기도는 사회자가 해요');
 }
+function retitleAll(){
+  var n=0;
+  Object.keys(D.months).forEach(function(k){ D.months[k].weeks.forEach(function(w){
+    if(w.skip || w.edited) return; var pg=progFor(w); if(!pg) return;
+    var tk=w.parts.filter(function(q){return q.kind==='talk'})[0]; if(tk){ var nt=talkTitle(pg); if(tk.title!==nt){ tk.title=nt; n++; } }
+    var lv=w.parts.filter(function(q){return q.kind==='living'});
+    (pg.s3||[]).forEach(function(it,i){ if(lv[i]){ var lt=livingTitle(it); if(lv[i].title!==lt){ lv[i].title=lt; n++; } } });
+  }); });
+  return n;
+}
 function monthAfterToday(){ var t=new Date(), y=t.getFullYear(), m=t.getMonth()+2; if(m>12){ m=1; y++; } return y+'-'+('0'+m).slice(-2); }
 
 function applyImport(weeks){
@@ -1796,6 +1810,7 @@ function renderSettings(){
   var h='<div class="panel"><h2>기본 설정</h2>';
   h+='<div class="field"><label for="setCong">회중 이름</label><input type="text" id="setCong" data-act="setCong" value="'+esc(D.settings.cong||'')+'" style="flex:1"></div>';
   h+='<div class="field"><label for="setTitle">계획표 제목</label><input type="text" id="setTitle" data-act="setTitle" value="'+esc(D.settings.title||'')+'" style="flex:1"></div>';
+  h+='<div class="field"><label class="opcb"><input type="checkbox" id="setThemeCb" data-act="themeCb"'+(useThemes()?' checked':'')+'> 연설·생활 파트에 교재의 <b>주제 제목</b> 쓰기</label><span class="note">끄면 “연설 (10분)”, “토의 (15분)”처럼 형식만 써요. 켜면 “우리가 두려움 없이 전파하는 이유 (10분)”처럼 써요.</span></div>';
   h+='<div class="field"><label class="opcb"><input type="checkbox" id="setOpenCb" data-act="openSepCb"'+(D.settings.openPrayer==='separate'?' checked':'')+'> 시작 기도를 사회자가 아닌 <b>다른 사람</b>이 함</label><span class="note">'+(D.settings.openPrayer?'체크하면 자동 배정이 시작 기도도 따로 정해요':'아직 정하지 않았어요. 자동 배정할 때 물어봐요')+'</span></div>';
   h+='<div class="field"><label for="setWd">모임 요일</label><select id="setWd" data-act="setWd">'+WD.map(function(d,i){return '<option value="'+i+'"'+(D.settings.weekday===i?' selected':'')+'>'+d+'요일</option>'}).join('')+'</select><span class="note">새 달을 추가할 때 이 요일 날짜로 주가 만들어져요.</span></div></div>';
   h+='<div class="panel"><h2>자동 배정 기준</h2><ul>'+
@@ -2246,6 +2261,7 @@ document.addEventListener('change', function(ev){
     case 'setCong': D.settings.cong=el.value.trim(); break;
     case 'wwd': ui.wwd=+el.value; return;
     case 'openSepCb': setOpenMode(el.checked?'separate':'chair', true); break;
+    case 'themeCb': D.settings.themes=el.checked; var rn=retitleAll(); toast((el.checked?'연설·토의에 주제 제목을 써요':'연설·토의는 형식만 써요')+(rn?'':' · 교재 내용이 있는 주부터 적용돼요')); break;
     case 'rname':
       var np=D.people.filter(function(q){return q.id===el.dataset.id})[0], nv=el.value.trim();
       if(!np) return;
