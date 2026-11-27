@@ -619,11 +619,11 @@ textarea.copy{width:100%;height:220px;font-size:12px;border:1px solid var(--line
         var pid = p[slot];
         if (!pid) { if ((slot !== 'openPrayer' || (data.settings && data.settings.openPrayer === 'separate')) && !(p.lock && p.lock[slot])) out[key] = '빈칸'; return; }
         var person = pm[pid];
-        if (!person) { if (String(pid).indexOf('txt:') !== 0) out[key] = '명단에 없음'; return; }
+        if (!person || person.deleted) { out[key] = '명단 없음'; return; }
         if (used[pid] > 1) out[key] = '같은 주 중복';
         else if ((person.away || []).indexOf(week.date) >= 0) out[key] = '불참 날짜';
         else if ((person.roles || []).indexOf(role) < 0) out[key] = '자격 미체크';
-        else if (slot === 'asst' && KINDS[p.kind].sameGender && p.main && pm[p.main] && pm[p.main].gender !== person.gender) out[key] = '성별 다름';
+        else if (slot === 'asst' && KINDS[p.kind].sameGender && p.main && pm[p.main] && !pm[p.main].deleted && pm[p.main].gender !== person.gender) out[key] = '성별 다름';
         else if (events && person.minGap > 1 && events.some(function (e) { return e.pid === pid && e.date !== week.date && Math.abs(daysBetween(e.date, week.date)) < person.minGap * 7; })) out[key] = person.minGap + '주 간격 안 됨';
       });
     });
@@ -1402,23 +1402,30 @@ function buildImportedWeek(date, items, nameId){
 // 시작 기도를 사회자와 다른 사람이 한 주가 더 많으면 “따로 배정” 회중
 function openModeOf(weeks){ var d=0, sm=0; weeks.forEach(function(w){ if(w._op==='diff') d++; else if(w._op==='same') sm++; }); if(!d && !sm) return null; return d>sm?'separate':'chair'; }
 function detectYear(grid, raw){
-  var cnt={};
-  grid.forEach(function(r){ (r||[]).forEach(function(v){ var t=cstr(v), m, re=/(20\d{2})\s*년/g; while((m=re.exec(t))) cnt[m[1]]=(cnt[m[1]]||0)+1; }); });
+  var pairs=[], cnt={}, Y4=function(y){ y=+y; return y<100?2000+y:y; };
+  grid.forEach(function(r){ (r||[]).forEach(function(v){ var t=cstr(v), m;
+    var re=/(20\d{2}|[2-3]\d)\s*년\s*(\d{1,2})\s*월/g; while((m=re.exec(t))){ var mo=+m[2]; if(mo>=1&&mo<=12) pairs.push({y:Y4(m[1]), m:mo}); }
+    var re2=/(20\d{2}|[2-3]\d)\s*년/g; while((m=re2.exec(t))) cnt[Y4(m[1])]=(cnt[Y4(m[1])]||0)+1; }); });
+  var minM=raw[0].m, roll=function(base){ return function(x){ return base+(x.m<minM && minM-x.m>6 ? 1 : 0); }; };
+  // ① 날짜 칸 자체에 연도
   var withY=raw.filter(function(x){ return x.y; });
-  if(withY.length) return {year:withY[0].y - (withY[0].m<raw[0].m && raw[0].m-withY[0].m>6 ? 1 : 0), why:'날짜 칸에 연도가 적혀 있어요'};
-  var ys=Object.keys(cnt).sort(function(a,b){ return cnt[b]-cnt[a] || a-b; });
-  if(ys.length){
-    // 맨 처음 달과 함께 적힌 연도를 우선 (예: “2025년 7월”)
-    var firstY=null, fm=raw[0].m;
-    grid.some(function(r){ return (r||[]).some(function(v){ var mm=/(20\d{2})\s*년\s*(\d{1,2})\s*월/.exec(cstr(v)); if(mm && +mm[2]===fm){ firstY=+mm[1]; return true; } return false; }); });
-    var yy=firstY||+ys[0]; return {year:yy, why:'표에 “'+yy+'년'+(firstY?' '+fm+'월':'')+'”이 적혀 있어요'};
+  if(withY.length){ var b0=withY[0].y-(withY[0].m<minM && minM-withY[0].m>6 ? 1 : 0); return {year:b0, yearFor:roll(b0), why:'날짜 칸에 연도가 적혀 있어요'}; }
+  // ② “26년 1월” 같은 제목: 주마다 가장 가까운 달 제목의 해를 씀 (1월 제목 아래 12/29 주는 그 전해)
+  if(pairs.length){
+    var yf=function(x){ var best=null;
+      pairs.forEach(function(pp){ var dm=Math.abs(pp.m-x.m); dm=Math.min(dm,12-dm); if(!best || dm<best.dm) best={pp:pp, dm:dm}; });
+      var pp=best.pp, y=pp.y; if(x.m-pp.m>6) y--; else if(pp.m-x.m>6) y++; return y; };
+    return {year:yf(raw[0]), yearFor:yf, why:'표에 “'+pairs[0].y+'년 '+pairs[0].m+'월”이 적혀 있어요'};
   }
-  var Y=new Date().getFullYear(), minM=raw[0].m, best=null, wkd=D.settings.weekday!=null?D.settings.weekday:2;
+  var ys=Object.keys(cnt).sort(function(a,b){ return cnt[b]-cnt[a] || a-b; });
+  if(ys.length){ var b1=+ys[0]; return {year:b1, yearFor:roll(b1), why:'표에 “'+b1+'년”이 적혀 있어요'}; }
+  // ③ 날짜의 요일
+  var Y=new Date().getFullYear(), best=null, wkd=D.settings.weekday!=null?D.settings.weekday:2;
   [Y-3,Y-2,Y-1,Y,Y+1].forEach(function(y0){ var ok=0;
-    raw.forEach(function(x){ var y=y0+(x.m<minM&&minM-x.m>6?1:0), wdN=new Date(Date.UTC(y,x.m-1,x.d)).getUTCDay(); if(wdN===wkd || wdN===1) ok++; });
+    raw.forEach(function(x){ var y=roll(y0)(x), wdN=new Date(Date.UTC(y,x.m-1,x.d)).getUTCDay(); if(wdN===wkd || wdN===1) ok++; });
     var dist=Math.abs(y0-Y); if(!best || ok>best.ok || (ok===best.ok && dist<best.dist)) best={y:y0, ok:ok, dist:dist}; });
-  if(best && best.ok && best.ok>=Math.ceil(raw.length*0.6)) return {year:best.y, why:'날짜의 요일이 '+best.y+'년과 맞아요'};
-  var mNow=new Date().getMonth()+1; return {year:(minM>mNow+2)?Y-1:Y, why:'표에 연도가 없어 오늘 날짜로 짐작했어요'};
+  if(best && best.ok && best.ok>=Math.ceil(raw.length*0.6)) return {year:best.y, yearFor:roll(best.y), why:'날짜의 요일이 '+best.y+'년과 맞아요'};
+  var mNow=new Date().getMonth()+1, b2=(minM>mNow+2)?Y-1:Y; return {year:b2, yearFor:roll(b2), why:'표에 연도가 없어 오늘 날짜로 짐작했어요'};
 }
 function yearVal(){ var v=(document.getElementById('impYear')||{}).value||'auto'; return v==='auto'?'auto':+v; }
 function importPreview(grid, year0){
@@ -1426,12 +1433,13 @@ function importPreview(grid, year0){
   D.people.filter(function(p){ return p.deleted; }).concat(livePeople()).forEach(function(p){ var k=p.name.replace(/\s+/g,''); nameId[k]=p.id; if(names.indexOf(k)<0) names.push(k); });
   var fuzzy={}; // 비슷한 이름 자동 연결은 쓰지 않음 (이름은 파일에 적힌 그대로만 맞춤)
   if(!raw.length) return {weeks:[], unknown:[], total:0};
-  if(year0==='auto' || !year0){ var dy=detectYear(grid, raw); year0=dy.year; yearWhy=dy.why; }
-  var minM=raw[0].m;
+  var minM=raw[0].m, yearFor;
+  if(year0==='auto' || !year0){ var dy=detectYear(grid, raw); year0=dy.year; yearWhy=dy.why; yearFor=dy.yearFor; }
+  else { var base=year0; yearFor=function(x){ return base+(x.m<minM && minM-x.m>6 ? 1 : 0); }; }
   var weeks=[], unknown={}, total=0, matched=0;
   raw.forEach(function(x){
     // 첫 달보다 앞 달(예: 12월 다음 1월)은 다음 해로 봄
-    var y=x.y || (year0 + (x.m<minM && minM-x.m>6 ? 1 : 0));
+    var y=x.y || yearFor(x);
     var date=y+'-'+('0'+x.m).slice(-2)+'-'+('0'+x.d).slice(-2);
     var wk=buildImportedWeek(date, x.items, nameId); if(!wk) return;
     wk.parts.forEach(function(p){ Sx.SLOTS.forEach(function(s){ var v=p[s]; if(!v) return; total++; if(String(v).indexOf('txt:')===0) unknown[String(v).slice(4)]=1; else matched++; }); });
