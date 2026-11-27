@@ -1226,18 +1226,38 @@ function findDate(g,r,c){
   return null;
 }
 // 표 안에서 “사회” 칸을 찾아, 그 오른쪽은 담당·보조, 아래로 마치는 기도까지를 한 주로 읽음 (두 달이 옆으로 붙어 있어도 됨)
+// 이름 칸 찾기: 파트 이름 칸이 여러 칸으로 합쳐진 엑셀도 있어서, 표마다 이름·보조자가 몇 칸 오른쪽인지 알아냄
+var NOT_NAME=/^(\d{1,2}\s*[\/.월]\s*\d{1,2}\s*일?|\d+|\(?\s*\d+\s*분\s*\)?|-|—)$/;
+function looksPart(v){ return /사회|기도|연설|보물|낭독|대화|관심이|제자가|신앙|토의|필요|연구|강연|동영상|노래|소개말|맺음말/.test(v); }
+function cleanName(n){
+  n=cstr(n).replace(/\([^)]*\)|\[[^\]]*\]|（[^）]*）/g,' ').replace(/[·•*※,]/g,' ').replace(/\s*(형제|자매|장로|봉사의\s*종|전도인)\s*$/,'').trim();
+  if(!n || NOT_NAME.test(n) || looksPart(n)) return '';
+  return n;
+}
+function detectOffsets(g, c, rowList){
+  var first={}, second={};
+  rowList.forEach(function(r){ var row=g[r]||[], hits=[];
+    for(var k=1;k<=6 && hits.length<2;k++){ var v=cstr(row[c+k]); if(!v) continue; if(NOT_NAME.test(v) || looksPart(v)) break; hits.push(k); }
+    if(hits[0]) first[hits[0]]=(first[hits[0]]||0)+1; if(hits[1]) second[hits[1]]=(second[hits[1]]||0)+1; });
+  var mode=function(o){ var b=null, bn=0; Object.keys(o).forEach(function(k){ if(o[k]>bn){ bn=o[k]; b=+k; } }); return b; };
+  var n=mode(first)||1, a=mode(second); if(!a || a<=n) a=n+1;
+  return {n:n, a:a};
+}
 function parseGrid(g){
   var out=[], rows=g.length, cols=0; g.forEach(function(r){ if(r.length>cols) cols=r.length; });
   for(var c=0;c<cols;c++){ var colBlocks=[]; for(var r=0;r<rows;r++){
     if(cstr((g[r]||[])[c]).replace(/\s+/g,'')!=='사회') continue;
     var dt=findDate(g,r,c);
-    var items=[];
+    var tRows=[];
     for(var rr=r; rr<rows; rr++){
       var t=cstr((g[rr]||[])[c]); if(rr>r && t.replace(/\s+/g,'')==='사회') break;
       if(!t) continue;
-      items.push({title:t, name:cstr((g[rr]||[])[c+1]), asst:cstr((g[rr]||[])[c+2])});
+      tRows.push(rr);
       if(/마치는\s*기도/.test(t)) break;
     }
+    var off=detectOffsets(g, c, tRows);
+    var items=tRows.map(function(rr){ var row=g[rr]||[];
+      return {title:cstr(row[c]), name:cleanName(row[c+off.n]), asst:cleanName(row[c+off.a])}; });
     colBlocks.push({m:dt?dt[0]:null, d:dt?dt[1]:null, items:items});
   }
   // 날짜를 못 읽은 주(사진 인식 등)는 앞뒤 주에서 7일씩 계산
@@ -1368,8 +1388,12 @@ function impProgress(t){ if(ui.imp){ ui.imp.busy=t; var el=document.getElementBy
 async function fileToCanvas(f){
   var url=URL.createObjectURL(f), img=new Image();
   await new Promise(function(r,j){ img.onload=r; img.onerror=j; img.src=url; });
-  var sc=img.width<1800?2:1, c=document.createElement('canvas'); c.width=img.width*sc; c.height=img.height*sc;
-  var x=c.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,c.width,c.height); x.drawImage(img,0,0,c.width,c.height); URL.revokeObjectURL(url);
+  var sc=Math.min(4, Math.max(1, 2600/img.width)), c=document.createElement('canvas'); c.width=Math.round(img.width*sc); c.height=Math.round(img.height*sc);
+  var x=c.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,c.width,c.height); x.imageSmoothingQuality='high'; x.drawImage(img,0,0,c.width,c.height); URL.revokeObjectURL(url);
+  // 흑백으로 바꾸고 대비를 높여 글자를 또렷하게
+  try{ var id=x.getImageData(0,0,c.width,c.height), dd=id.data;
+    for(var i=0;i<dd.length;i+=4){ var gy=0.299*dd[i]+0.587*dd[i+1]+0.114*dd[i+2]; gy=gy<128?gy*0.8:Math.min(255,gy*1.15); dd[i]=dd[i+1]=dd[i+2]=gy; }
+    x.putImageData(id,0,0); }catch(e){}
   return c;
 }
 async function ocrCanvas(canvases){
