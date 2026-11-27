@@ -320,7 +320,7 @@ textarea.copy{width:100%;height:220px;font-size:12px;border:1px solid var(--line
     { key: 'talk', label: '보물 연설', male: true },
     { key: 'gems', label: '영적 보물', male: true },
     { key: 'reading', label: '성경 낭독', male: true },
-    { key: 'student', label: '학생 과제', male: false },
+    { key: 'student', label: '실연', male: false },
     { key: 'assistant', label: '보조자', male: false },
     { key: 'studentTalk', label: '학생 연설', male: true },
     { key: 'living', label: '생활 파트', male: true },
@@ -840,7 +840,11 @@ function render(){
   if(ui.wed!=null && ui.tab==='plan' && D.months[ui.month] && D.months[ui.month].weeks[ui.wed]) h+=renderWeekEditor();
   var sx=window.scrollX, sy=window.scrollY;
   var fid = document.activeElement && document.activeElement.id;
+  var vkey=ui.tab+'|'+(ui.pview||'')+'|'+(ui.statView||'')+'|'+(ui.month||''), tw=[];
+  if(render.vkey===vkey) app.querySelectorAll('.tablewrap').forEach(function(e){ tw.push([e.scrollTop,e.scrollLeft]); });
   app.innerHTML=h;
+  render.vkey=vkey;
+  app.querySelectorAll('.tablewrap').forEach(function(e,i){ if(tw[i]){ e.scrollTop=tw[i][0]; e.scrollLeft=tw[i][1]; } });
   setStatus();
   window.scrollTo(sx,sy);
   if(ui.wedFocus){ fid=ui.wedFocus; ui.wedFocus=null; }
@@ -968,7 +972,7 @@ function renderWeek(w,wi){
 
 /* 주별 파트 맞추기 */
 var S2_PRESETS=[['대화 시작하기',3,'pair'],['관심이 자라도록 돕기',4,'pair'],['제자가 되도록 돕기',5,'pair'],['우리의 신앙 설명하기',5,'pair'],['연설',5,'talk'],['뭐라고 말할 것입니까?',5,'talk']];
-var WHO=[['pair','학생 + 보조자'],['solo','학생 혼자'],['talk','형제 연설']];
+var WHO=[['pair','실연 + 보조자'],['solo','혼자 실연'],['talk','형제 연설']];
 function splitTitle(t){ var m=/^(.*?)\s*\((\d+)분\)\s*$/.exec(t||''); return m?{name:m[1],min:+m[2]}:{name:t||'',min:null}; }
 function joinTitle(n,m){ n=(n||'').trim(); return m?n+' ('+m+'분)':n; }
 function whoOf(p){ return p.kind==='studentTalk'?'talk':(p.noAsst?'solo':'pair'); }
@@ -1129,7 +1133,7 @@ function renderStudentGrid(keys){
     });
   });
   var h1='', h2='';
-  for(var i=1;i<=maxN;i++){ h1+='<th colspan="2" class="grp">과제 '+(i+3)+'번</th>'; h2+='<th class="st">학생</th><th class="sa">보조자</th>'; }
+  for(var i=1;i<=maxN;i++){ h1+='<th colspan="2" class="grp">과제 '+(i+3)+'번</th>'; h2+='<th class="st">실연</th><th class="sa">보조자</th>'; }
   var h='<p class="hint">'+(hi?'<b>'+esc(nameOf(hi))+'</b> · 이 기간 학생 과제 '+cnt+'번 · 다시 누르면 표시가 꺼져요':'이름을 누르면 그 사람이 맡은 칸이 모두 표시돼요.')+'</p>';
   return h+'<div class="tablewrap tall"><table class="stat sgrid stud"><thead><tr class="r1"><th class="nmcol" rowspan="2">날짜</th>'+h1+'</tr><tr class="r2">'+h2+'</tr></thead><tbody>'+body+'</tbody></table></div>';
 }
@@ -1137,7 +1141,7 @@ function renderStudentGrid(keys){
 /* 통계 · 주별 표 (세로: 날짜, 가로: 파트) */
 var SCHOOL={student:1,assistant:1,studentTalk:1};
 var STAT_COLS=[{key:'chair',label:'사회',role:'chair'},{key:'openPrayer',label:'시작 기도',role:'prayer'},{key:'talk',label:'연설',role:'talk'},{key:'gems',label:'보물',role:'gems'},
-  {key:'reading',label:'낭독',role:'reading'},{key:'student',label:'학생',role:'student'},{key:'assistant',label:'보조',role:'assistant'},{key:'studentTalk',label:'학생 연설',role:'studentTalk'},
+  {key:'reading',label:'낭독',role:'reading'},{key:'student',label:'실연',role:'student'},{key:'assistant',label:'보조',role:'assistant'},{key:'studentTalk',label:'학생 연설',role:'studentTalk'},
   {key:'living',label:'생활',role:'living'},{key:'cbs',label:'연구 사회',role:'cbs'},{key:'cbsReader',label:'연구 낭독',role:'cbsReader'},{key:'closePrayer',label:'마치는 기도',role:'prayer'}];
 // 한 칸이 통계의 어느 열에 들어가는지 (사회자가 시작 기도도 하면 시작 기도 열에도 넣되 imp로 표시)
 function statKeysOf(p,s){
@@ -1168,11 +1172,12 @@ function renderStatGrid(keys){
 }
 
 /* 통계 */
-var ROLE_SHORT={chair:'사회',talk:'연설',gems:'보물',reading:'낭독',student:'학생',assistant:'보조',studentTalk:'학생 연설',living:'생활',cbs:'연구 사회',cbsReader:'연구 낭독',prayer:'기도'};
+var ROLE_SHORT={chair:'사회',talk:'연설',gems:'보물',reading:'낭독',student:'실연',assistant:'보조',studentTalk:'학생 연설',living:'생활',cbs:'연구 사회',cbsReader:'연구 낭독',prayer:'기도'};
 function statKeys(){
   var keys=monthKeys(), st=ui.stat; if(!keys.length) return [];
   if(st.preset==='custom' && st.from && st.to) return keys.filter(function(k){return k>=st.from&&k<=st.to});
-  var end=keys.indexOf(ui.month); if(end<0) end=keys.length-1;
+  // 기준은 오늘이 속한 달 (그 달 계획이 없으면 가장 가까운 달)
+  var thisK=today().slice(0,7), end=-1; keys.forEach(function(k,i){ if(k<=thisK) end=i; }); if(end<0) end=0;
   if(st.preset==='all') return keys.slice();
   var n=st.preset==='1'?1:st.preset==='6'?6:3;
   return keys.slice(Math.max(0,end-n+1), end+1);
@@ -1185,7 +1190,7 @@ function renderStats(){
   var h='<div class="statctl">';
   h+='<div class="sc-row"><span class="sc-lab">보기</span><nav class="subtabs" role="tablist" aria-label="통계 보기" style="margin:0">'+[['people','사람별 횟수'],['grid','주별 표'],['student','학생 과제']].map(function(t){
     return '<button role="tab" data-act="statView" data-v="'+t[0]+'" aria-selected="'+(view===t[0])+'">'+t[1]+'</button>'; }).join('')+'</nav></div>';
-  h+='<div class="sc-row"><span class="sc-lab">기간</span><span class="seg gseg">'+[['1',(+curM.slice(5,7))+'월만'],['3','최근 3개월'],['6','최근 6개월'],['all','전체'],['custom','직접 고르기']].map(function(x){
+  h+='<div class="sc-row"><span class="sc-lab">기간</span><span class="seg gseg">'+[['1','이번 달'],['3','최근 3개월'],['6','최근 6개월'],['all','전체'],['custom','직접 고르기']].map(function(x){
     return '<button data-act="statPreset" data-v="'+x[0]+'" aria-pressed="'+(st.preset===x[0])+'">'+x[1]+'</button>'; }).join('')+'</span>';
   if(st.preset==='custom'){
     var opt=function(sel){ return all.map(function(k){return '<option value="'+k+'"'+(k===sel?' selected':'')+'>'+mlabel(k)+'</option>'}).join(''); };
@@ -1331,12 +1336,25 @@ function buildImportedWeek(date, items, nameId){
   if(!chair) return null;
   return {date:date, skip:false, note:'', parts:parts, edited:true, imported:true};
 }
+// 몇 년도 임명표인지: ① 표에 적힌 'YYYY년' ② 날짜의 요일이 모임 요일(또는 월요일)과 맞는 해 ③ 오늘 기준 가까운 해
+function detectYear(grid, raw){
+  var cnt={};
+  grid.forEach(function(r){ (r||[]).forEach(function(v){ var t=cstr(v), m, re=/(20\d{2})\s*년/g; while((m=re.exec(t))) cnt[m[1]]=(cnt[m[1]]||0)+1; }); });
+  var ys=Object.keys(cnt).sort(); if(ys.length) return {year:+ys[0], why:'표에 “'+ys[0]+'년”이 적혀 있어요'};
+  var Y=new Date().getFullYear(), minM=raw[0].m, best=null, wkd=D.settings.weekday!=null?D.settings.weekday:2;
+  [Y-3,Y-2,Y-1,Y,Y+1].forEach(function(y0){ var ok=0;
+    raw.forEach(function(x){ var y=y0+(x.m<minM&&minM-x.m>6?1:0), wdN=new Date(Date.UTC(y,x.m-1,x.d)).getUTCDay(); if(wdN===wkd || wdN===1) ok++; });
+    var dist=Math.abs(y0-Y); if(!best || ok>best.ok || (ok===best.ok && dist<best.dist)) best={y:y0, ok:ok, dist:dist}; });
+  if(best && best.ok && best.ok>=Math.ceil(raw.length*0.6)) return {year:best.y, why:'날짜의 요일이 '+best.y+'년과 맞아요'};
+  var mNow=new Date().getMonth()+1; return {year:(minM>mNow+2)?Y-1:Y, why:'표에 연도가 없어 오늘 날짜로 짐작했어요'};
+}
+function yearVal(){ var v=(document.getElementById('impYear')||{}).value||'auto'; return v==='auto'?'auto':+v; }
 function importPreview(grid, year0){
-  var raw=parseGrid(grid), nameId={}, names=[];
+  var raw=parseGrid(grid), nameId={}, names=[], yearWhy='';
   D.people.filter(function(p){ return p.deleted; }).concat(livePeople()).forEach(function(p){ var k=p.name.replace(/\s+/g,''); nameId[k]=p.id; if(names.indexOf(k)<0) names.push(k); });
   var fuzzy={}; // 비슷한 이름 자동 연결은 쓰지 않음 (이름은 파일에 적힌 그대로만 맞춤)
   if(!raw.length) return {weeks:[], unknown:[], total:0};
-  var firstM=raw.map(function(x){return x.m}).reduce(function(a,b){ return Math.min(a,b); });
+  if(year0==='auto' || !year0){ var dy=detectYear(grid, raw); year0=dy.year; yearWhy=dy.why; }
   var minM=raw[0].m;
   var weeks=[], unknown={}, total=0, matched=0;
   raw.forEach(function(x){
@@ -1348,7 +1366,7 @@ function importPreview(grid, year0){
     weeks.push(wk);
   });
   weeks.sort(function(a,b){ return a.date<b.date?-1:1; });
-  return {weeks:weeks, unknown:Object.keys(unknown), total:total, matched:matched, fuzzy:fuzzy};
+  return {weeks:weeks, unknown:Object.keys(unknown), total:total, matched:matched, fuzzy:fuzzy, yearWhy:yearWhy};
 }
 // 옛날 임명표에 나온 이름과, 그 사람이 했던 파트로 구분을 추측
 function inferRoster(grid){
@@ -1504,7 +1522,7 @@ function renderImport(){
   h+=start?'<header><h3>옛날 임명표에서 이름 가져오기</h3><p>옛날 임명표에 나온 이름으로 명단만 채워요. 계획표는 만들지 않아요.</p></header><div class="wedbody">'
           :'<header><h3>예전 임명표 가져오기</h3><p>지난 임명표를 넣어 두면 자동 배정이 그 기록부터 이어서 공평하게 돌려요.</p></header><div class="wedbody">';
   h+='<ol class="note" style="margin:0;padding-left:18px;line-height:1.7" hidden><li>엑셀이나 구글 시트로 만든 예전 임명표를 열고, 표 전체를 드래그해서 <b>복사</b>하세요. (두 달이 옆으로 붙어 있어도 돼요)</li><li>아래 칸에 <b>붙여 넣거나</b>, 파일(.xlsx · .csv)을 그대로 고르세요.</li><li>몇 년도 임명표인지 고르고 <b>미리 보기</b>를 누르세요.</li></ol>';
-  h+='<div class="frow"><label for="impYear">연도</label><select id="impYear" class="gsel">'+[y-2,y-1,y,y+1].map(function(v){ return '<option value="'+v+'"'+(v===I.year?' selected':'')+'>'+v+'년</option>'; }).join('')+'</select>'+
+  h+='<div class="frow"><label for="impYear">연도</label><select id="impYear" class="gsel"><option value="auto"'+(I.year==='auto'?' selected':'')+'>자동으로 판단</option>'+[y-3,y-2,y-1,y,y+1].map(function(v){ return '<option value="'+v+'"'+(v===I.year?' selected':'')+'>'+v+'년</option>'; }).join('')+'</select>'+
     '<label class="btn" for="impFile" style="margin-left:auto">파일 고르기 (엑셀·PDF·사진)</label><input type="file" id="impFile" accept=".xlsx,.xls,.csv,.tsv,.txt,.pdf,image/*" hidden></div>';
   h+='<p class="note" style="margin:0">엑셀·구글 시트·PDF·사진 어떤 것이든 돼요. 두 달이 옆으로 붙은 표도 괜찮아요.</p>';
   h+='<div class="frow"><input type="url" id="impLink" placeholder="구글 시트 링크 붙여 넣기 (링크가 있는 모든 사용자 보기로 공유된 시트)" style="flex:1" value="'+esc(I.link||'')+'"><button class="btn" data-act="impLink">링크로 불러오기</button></div>';
@@ -1526,7 +1544,7 @@ function renderImport(){
     else {
       var tdy=today(), sameWk=function(w){ var M=D.months[mondayKey(w.date).slice(0,7)]; return M && M.weeks.some(function(x){ return mondayKey(x.date)===mondayKey(w.date); }); };
       var exist=pv.weeks.filter(function(w){ return sameWk(w) && w.date<tdy; }).length, existF=pv.weeks.filter(function(w){ return sameWk(w) && w.date>=tdy; }).length, futureN=pv.weeks.filter(function(w){ return w.date>=tdy; }).length;
-      h+='<div class="callout" style="flex-direction:column;align-items:flex-start"><b>'+pv.weeks.length+'주를 찾았어요 · '+wd(pv.weeks[0].date)+' ~ '+wd(pv.weeks[pv.weeks.length-1].date)+' ('+pv.weeks[0].date.slice(0,4)+'년)</b>'+
+      h+='<div class="callout" style="flex-direction:column;align-items:flex-start"><b>'+pv.weeks.length+'주를 찾았어요 · '+wd(pv.weeks[0].date)+' ~ '+wd(pv.weeks[pv.weeks.length-1].date)+' ('+pv.weeks[0].date.slice(0,4)+'년)</b>'+(pv.yearWhy?'<span class="note">'+esc(pv.yearWhy)+' · 다르면 위 “연도”에서 직접 고르세요</span>':'')+
         '<span>이름 '+pv.total+'칸 중 '+pv.matched+'칸이 명단과 연결됐어요.</span>'+
         (pv.unknown.length?(function(){ var pp=pv.unknown.filter(isNameLike), junk=pv.unknown.filter(function(n){ return !isNameLike(n); });
           return (pp.length?'<span>지금 명단에 없는 이름 '+pp.length+'명: '+esc(pp.slice(0,20).join(', '))+(pp.length>20?' …':'')+'<br><b>그 당시 성원</b>으로 기록에 남겨요. 통계에는 잡히고, 앞으로의 자동 배정에는 들어가지 않아요.</span>'+
@@ -1918,24 +1936,24 @@ document.addEventListener('click', function(ev){
     case 'fsOpen': fsOpen(); return;
     case 'fsResume': fsResume(); return;
     case 'fsOff': fsOff(); return;
-    case 'impOpen': ui.imp={year:new Date().getFullYear(), text:'', preview:null, grid:null}; break;
+    case 'impOpen': ui.imp={year:'auto', text:'', preview:null, grid:null}; break;
     case 'closeImp': ui.imp=null; break;
     case 'impPreview':
       ui.imp.addLive=!!(document.getElementById('impAddLive')||{}).checked;
-      ui.imp.text=document.getElementById('impText').value; ui.imp.year=+document.getElementById('impYear').value;
+      ui.imp.text=document.getElementById('impText').value; ui.imp.year=yearVal();
       var gridP=ui.imp.text.trim()?parseTSV(ui.imp.text):ui.imp.grid;
       if(!gridP){ toast('표를 붙여 넣거나 파일을 골라 주세요'); return; }
       ui.imp.grid=gridP;
       if(ui.imp.mode==='start') ui.imp.roster=inferRoster(gridP); else ui.imp.preview=importPreview(gridP, ui.imp.year); break;
     case 'impCancel': ui.pendingImport=null; ui.draft=null; break;
     case 'impLink':
-      var lk=(document.getElementById('impLink').value||'').trim(); ui.imp.link=lk; ui.imp.year=+document.getElementById('impYear').value;
+      var lk=(document.getElementById('impLink').value||'').trim(); ui.imp.link=lk; ui.imp.year=yearVal();
       if(!lk){ toast('구글 시트 링크를 붙여 넣어 주세요'); return; }
       impProgress('구글 시트 불러오는 중…');
       readSheetLink(lk).then(function(g){ impLoaded(g,false); }).catch(function(e){ ui.imp.busy=null; render();
         toast(e.message==='link'?'구글 시트 링크가 아니에요':'시트를 열 수 없어요. 공유를 “링크가 있는 모든 사용자 · 보기”로 바꾸거나, 표를 복사해 붙여 넣어 주세요'); });
       return;
-    case 'impStartOpen': ui.imp={mode:'start', year:new Date().getFullYear(), text:'', preview:null, grid:null, roster:null}; break;
+    case 'impStartOpen': ui.imp={mode:'start', year:'auto', text:'', preview:null, grid:null, roster:null}; break;
     case 'impStart':
       var ctxS=livePeople().length?'people':'welcome';
       ensureDraft(ctxS, ctxS==='welcome'?5:1);
@@ -2168,7 +2186,7 @@ function filterCands(){
 }
 document.addEventListener('change', function(ev){
   var el=ev.target; if(el.id!=='impFile' || !el.files || !el.files[0] || !ui.imp) return;
-  var f=el.files[0]; ui.imp.year=+document.getElementById('impYear').value; ui.imp.preview=null; ui.imp.roster=null;
+  var f=el.files[0]; ui.imp.year=yearVal(); ui.imp.preview=null; ui.imp.roster=null;
   readImportFile(f).then(function(res){ impLoaded(res.grid, res.ocr); })
     .catch(function(){ ui.imp.busy=null; render(); toast('파일을 읽지 못했어요. 인터넷 연결을 확인하거나 표를 복사해 붙여 넣어 보세요'); });
 });
