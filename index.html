@@ -1289,7 +1289,6 @@ function parseDateCell(v){
   if((m=/^(20\d{2}|\d{2})\s*(?:[.\/\-]|년)\s*(\d{1,2})\s*(?:[.\/\-]|월)\s*(\d{1,2})\s*[.일]?(?:\s*[-~]\s*\d{1,2}\s*일?)?$/.exec(t)) && ok(+m[2],+m[3])) return [+m[2],+m[3],yy(m[1])];
   if((m=/^(\d{1,2})\s*[\/\-]\s*(\d{1,2})\s*[\/\-]\s*(20\d{2}|\d{2})$/.exec(t)) && ok(+m[1],+m[2])) return [+m[1],+m[2],yy(m[3])];
   if((m=/^(\d{1,2})\s*(?:[\/.]|월)\s*(\d{1,2})\s*일?(?:\s*[-~]\s*(?:\d{1,2}\s*월\s*)?\d{1,2}\s*일?)?\.?$/.exec(t)) && ok(+m[1],+m[2])) return [+m[1],+m[2]];
-  if(/^\d{5}(\.\d+)?$/.test(t)){ var n=Math.floor(+t); if(n>36000 && n<60000){ var dt=new Date(Date.UTC(1899,11,30+n)); return [dt.getUTCMonth()+1, dt.getUTCDate(), dt.getUTCFullYear()]; } }
   return null;
 }
 function findDate(g,r,c){
@@ -1304,6 +1303,8 @@ function looksPart(v){ return /사회|기도|연설|보물|낭독|대화|관심�
 function cleanName(n){
   n=cstr(n).replace(/\([^)]*\)|\[[^\]]*\]|（[^）]*）/g,' ').replace(/[·•*※,]/g,' ').replace(/\s*(형제|자매|장로|봉사의\s*종|전도인)\s*$/,'').trim();
   if(!n || NOT_NAME.test(n) || looksPart(n)) return '';
+  n=n.replace(/[^가-힣\s]/g,'').replace(/\s+/g,' ').trim();   // 영문·숫자·기호 잡글자 빼기
+  if(n.replace(/\s+/g,'').length<2) return '';
   return n;
 }
 function detectOffsets(g, c, rowList){
@@ -1343,15 +1344,16 @@ function rowNames(row, c, limit){
   });
   return {name:main, asst:asst};
 }
+function isChairTitle(v){ var h=cstr(v).replace(/[^가-힣]/g,''); return h==='사회' || h==='사호' || h==='사화' || (/^사[회호화]$/.test(h.slice(0,2)) && h.length<=3 && cstr(v).length<=8); }
 function parseGrid(g){
   var out=[], rows=g.length, cols=0; g.forEach(function(r){ if(r.length>cols) cols=r.length; });
-  var titleCols=[]; for(var cc=0;cc<cols;cc++){ for(var r0=0;r0<rows;r0++){ if(cstr((g[r0]||[])[cc]).replace(/\s+/g,'')==='사회'){ titleCols.push(cc); break; } } }
+  var titleCols=[]; for(var cc=0;cc<cols;cc++){ for(var r0=0;r0<rows;r0++){ if(isChairTitle((g[r0]||[])[cc])){ titleCols.push(cc); break; } } }
   for(var c=0;c<cols;c++){ var colBlocks=[]; for(var r=0;r<rows;r++){
-    if(cstr((g[r]||[])[c]).replace(/\s+/g,'')!=='사회') continue;
+    if(!isChairTitle((g[r]||[])[c])) continue;
     var dt=findDate(g,r,c);
     var tRows=[];
     for(var rr=r; rr<rows; rr++){
-      var t=cstr((g[rr]||[])[c]); if(rr>r && t.replace(/\s+/g,'')==='사회') break;
+      var t=cstr((g[rr]||[])[c]); if(rr>r && isChairTitle(t)) break;
       if(!t) continue;
       tRows.push(rr);
       if(/마치는\s*기도/.test(t)) break;
@@ -1372,7 +1374,7 @@ function parseGrid(g){
     if(b.m) return; var pr=colBlocks[i-1], nx=colBlocks[i+1], v=null;
     if(pr && pr.m) v=shift(pr.m,pr.d,7); else if(nx && nx.m) v=shift(nx.m,nx.d,-7);
     if(v){ b.m=v[0]; b.d=v[1]; b.guessDate=true; } });
-  colBlocks.forEach(function(b){ if(b.m) out.push(b); }); }
+  colBlocks.forEach(function(b){ out.push(b); }); }
   return out;
 }
 function s2Known(t){ var n=splitTitle(t).name.replace(/^\d+\s*[.)]\s*/,''); return /^연설/.test(n) || S2_PRESETS.some(function(x){ return x[0]===n; }); }
@@ -1382,11 +1384,11 @@ function buildImportedWeek(date, items, nameId){
   var id=function(n){ n=(n||'').replace(/\s+/g,''); if(!n) return null; return nameId[n]||('txt:'+n); };
   items.forEach(function(it){
     var t=it.title.replace(/^\d+\s*[.)]\s*/,''), nm=id(it.name), as=id(it.asst), p;
-    if(t.replace(/\s+/g,'')==='사회'){ chair=Sx.makePart('chair','사회'); chair.main=nm; chair.lock={main:true,asst:true}; parts.push(chair); return; }
+    if(isChairTitle(t)){ chair=Sx.makePart('chair','사회'); chair.main=nm; chair.lock={main:true,asst:true}; parts.push(chair); return; }
     if(/시작\s*기도/.test(t)){ if(chair && nm){ if(nm!==chair.main){ chair.openPrayer=nm; opSeen='diff'; } else opSeen='same'; } return; }
     if(/마치는\s*기도/.test(t)) p=Sx.makePart('prayer','마치는 기도');
-    else if(/영적\s*보물/.test(t)) p=Sx.makePart('gems',t);
-    else if(/성경\s*낭독/.test(t)){ p=Sx.makePart('reading',t); sec=2; }
+    else if(/보\s*물/.test(t)) p=Sx.makePart('gems',t);
+    else if(/낭\s*독/.test(t) && !/연구/.test(t)){ p=Sx.makePart('reading',t); sec=2; }
     else if(/회중\s*성서\s*연구/.test(t)){ p=Sx.makePart('cbs',t); p.asst=as; sec=3; }
     else if(/봉사\s*강연/.test(t)){ p=Sx.makePart('manual',t,3); p.text=it.name; sec=3; }
     else if(!parts.some(function(q){ return q.kind==='talk'; })) p=Sx.makePart('talk',t);
@@ -1429,10 +1431,17 @@ function detectYear(grid, raw){
 }
 function yearVal(){ var v=(document.getElementById('impYear')||{}).value||'auto'; return v==='auto'?'auto':+v; }
 function importPreview(grid, year0){
-  var raw=parseGrid(grid), nameId={}, names=[], yearWhy='';
+  var rawAll=parseGrid(grid), nameId={}, names=[], yearWhy='', undated=rawAll.filter(function(x){ return !x.m; }).length, firstDate=ui.imp&&ui.imp.firstDate;
+  if(undated && firstDate){
+    // 첫 주 날짜부터 표 순서대로 7일씩
+    var fd=new Date(firstDate+'T00:00:00Z');
+    rawAll.forEach(function(x,i){ var t=new Date(fd); t.setUTCDate(t.getUTCDate()+7*i); x.m=t.getUTCMonth()+1; x.d=t.getUTCDate(); x.y=t.getUTCFullYear(); });
+    undated=0;
+  }
+  var raw=rawAll.filter(function(x){ return x.m; });
   D.people.filter(function(p){ return p.deleted; }).concat(livePeople()).forEach(function(p){ var k=p.name.replace(/\s+/g,''); nameId[k]=p.id; if(names.indexOf(k)<0) names.push(k); });
   var fuzzy={}; // 비슷한 이름 자동 연결은 쓰지 않음 (이름은 파일에 적힌 그대로만 맞춤)
-  if(!raw.length) return {weeks:[], unknown:[], total:0};
+  if(!raw.length) return {weeks:[], unknown:[], total:0, undated:undated};
   var minM=raw[0].m, yearFor;
   if(year0==='auto' || !year0){ var dy=detectYear(grid, raw); year0=dy.year; yearWhy=dy.why; yearFor=dy.yearFor; }
   else { var base=year0; yearFor=function(x){ return base+(x.m<minM && minM-x.m>6 ? 1 : 0); }; }
@@ -1447,7 +1456,7 @@ function importPreview(grid, year0){
   });
   weeks.sort(function(a,b){ return a.date<b.date?-1:1; });
   var opMode=openModeOf(weeks); weeks.forEach(function(w){ delete w._op; });
-  return {weeks:weeks, unknown:Object.keys(unknown), total:total, matched:matched, fuzzy:fuzzy, yearWhy:yearWhy, opMode:opMode};
+  return {weeks:weeks, unknown:Object.keys(unknown), total:total, matched:matched, fuzzy:fuzzy, yearWhy:yearWhy, opMode:opMode, undated:undated};
 }
 // 옛날 임명표에 나온 이름과, 그 사람이 했던 파트로 구분을 추측
 function inferRoster(grid){
@@ -1589,8 +1598,8 @@ async function readImportFile(f){
   if(/\.(xlsx|xls)$/i.test(f.name)){
     impProgress('엑셀 파일 읽는 중…');
     await loadLib('XLSX','https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
-    var wb=window.XLSX.read(await f.arrayBuffer(),{type:'array'}), grid=[];
-    wb.SheetNames.forEach(function(n){ grid=grid.concat(window.XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:false,defval:''})); grid.push([]); });
+    var wb=window.XLSX.read(await f.arrayBuffer(),{type:'array',cellDates:true}), grid=[];
+    wb.SheetNames.forEach(function(n){ grid=grid.concat(window.XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:false,defval:'',dateNF:'yyyy-mm-dd'})); grid.push([]); });
     return {grid:grid};
   }
   if(/\.pdf$/i.test(f.name) || f.type==='application/pdf') return await readPdf(f);
@@ -1635,14 +1644,19 @@ function renderImport(){
     }
   }
   if(!start && pv){
-    if(!pv.weeks.length) h+='<div class="callout warn">임명표를 찾지 못했어요. “사회”, “마치는 기도” 같은 파트 이름과 날짜(예: 11/3)가 들어 있는 표를 복사했는지 확인해 주세요.</div>';
-    else {
+    if(pv.undated) h+='<div class="callout warn" style="flex-direction:column;align-items:flex-start"><span><b>날짜를 못 읽은 주가 '+pv.undated+'개 있어요.</b> 맨 왼쪽 위 첫 주의 모임 날짜를 넣으면 표 순서대로 7일씩 이어서 넣어요.</span>'+
+      '<span class="frow"><input type="date" id="impFirst" value="'+esc(I.firstDate||'')+'"><button class="btn" data-act="impFirst">이 날짜로 맞추기</button></span></div>';
+    if(!pv.weeks.length && !pv.undated) h+='<div class="callout warn">임명표를 찾지 못했어요. “사회”, “마치는 기도” 같은 파트 이름과 날짜(예: 11/3)가 들어 있는 표를 복사했는지 확인해 주세요.</div>';
+    else if(pv.weeks.length) {
       var tdy=today(), sameWk=function(w){ var M=D.months[mondayKey(w.date).slice(0,7)]; return M && M.weeks.some(function(x){ return mondayKey(x.date)===mondayKey(w.date); }); };
       var exist=pv.weeks.filter(function(w){ return sameWk(w) && w.date<tdy; }).length, existF=pv.weeks.filter(function(w){ return sameWk(w) && w.date>=tdy; }).length, futureN=pv.weeks.filter(function(w){ return w.date>=tdy; }).length;
       h+='<div class="callout" style="flex-direction:column;align-items:flex-start"><b>'+pv.weeks.length+'주를 찾았어요 · '+wd(pv.weeks[0].date)+' ~ '+wd(pv.weeks[pv.weeks.length-1].date)+' ('+pv.weeks[0].date.slice(0,4)+'년)</b>'+(pv.yearWhy?'<span class="note">'+esc(pv.yearWhy)+' · 다르면 위 “연도”에서 직접 고르세요</span>':'')+
         '<span>이름 '+pv.total+'칸 중 '+pv.matched+'칸이 명단과 연결됐어요.</span>'+
         (pv.unknown.length?(function(){ var pp=pv.unknown.filter(isNameLike), junk=pv.unknown.filter(function(n){ return !isNameLike(n); });
-          return (pp.length?'<span>지금 명단에 없는 이름 '+pp.length+'명: '+esc(pp.slice(0,20).join(', '))+(pp.length>20?' …':'')+'<br><b>그 당시 성원</b>으로 기록에 남겨요. 통계에는 잡히고, 앞으로의 자동 배정에는 들어가지 않아요.</span>'+
+          return (pp.length?(I.ocr
+              ? '<span style="color:var(--warn)">명단에 없는 이름 '+pp.length+'명: '+esc(pp.slice(0,20).join(', '))+(pp.length>20?' …':'')+'<br><b>사진에서 읽은 이름이라 글자가 틀렸을 수 있어요.</b> 위 칸에서 고친 뒤 “미리 보기”를 다시 누르세요. 그대로 가져오면 글자로만 들어가요.</span>'+
+                '<label class="note" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="impKeepFormer"'+(I.keepFormer?' checked':'')+'> 맞는 이름이에요 — 그 당시 성원으로 기록하기</label>'
+              : '<span>지금 명단에 없는 이름 '+pp.length+'명: '+esc(pp.slice(0,20).join(', '))+(pp.length>20?' …':'')+'<br><b>그 당시 성원</b>으로 기록에 남겨요. 통계에는 잡히고, 앞으로의 자동 배정에는 들어가지 않아요.</span>')+
             '<label class="note" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="impAddLive"'+(I.addLive?' checked':'')+'> 이 사람들을 지금 명단에도 넣기 (지금도 있는 사람이면 체크)</label>':'')+
             (junk.length?'<span style="color:var(--warn)">이름으로 보기 어려운 글자 '+junk.length+'개: '+esc(junk.slice(0,10).join(', '))+' — 글자 그대로 들어가요. 틀리게 읽힌 것이면 위 칸에서 고쳐 주세요.</span>':''); })():'')+
         (futureN?'<span>이 중 <b>앞으로의 주 '+futureN+'주</b>는 미리 짜 둔 계획으로 그대로 넣어요.'+(existF?' 여기서 자동으로 짜 둔 '+existF+'주는 파일 내용으로 바뀌어요.':'')+'</span>':'')+
@@ -2038,7 +2052,7 @@ document.addEventListener('click', function(ev){
     case 'impOpen': ui.imp={year:'auto', text:'', preview:null, grid:null}; break;
     case 'closeImp': ui.imp=null; break;
     case 'impPreview':
-      ui.imp.addLive=!!(document.getElementById('impAddLive')||{}).checked;
+      ui.imp.addLive=!!(document.getElementById('impAddLive')||{}).checked; ui.imp.keepFormer=!!(document.getElementById('impKeepFormer')||{}).checked;
       ui.imp.text=document.getElementById('impText').value; ui.imp.year=yearVal();
       var gridP=ui.imp.text.trim()?parseTSV(ui.imp.text):ui.imp.grid;
       if(!gridP){ toast('표를 붙여 넣거나 파일을 골라 주세요'); return; }
@@ -2052,6 +2066,10 @@ document.addEventListener('click', function(ev){
       readSheetLink(lk).then(function(g){ impLoaded(g,false); }).catch(function(e){ ui.imp.busy=null; render();
         toast(e.message==='link'?'구글 시트 링크가 아니에요':'시트를 열 수 없어요. 공유를 “링크가 있는 모든 사용자 · 보기”로 바꾸거나, 표를 복사해 붙여 넣어 주세요'); });
       return;
+    case 'impFirst':
+      var fv=(document.getElementById('impFirst')||{}).value; if(!fv){ toast('첫 주 날짜를 골라 주세요'); return; }
+      ui.imp.firstDate=fv; ui.imp.text=document.getElementById('impText').value;
+      var gF=ui.imp.text.trim()?parseTSV(ui.imp.text):ui.imp.grid; ui.imp.preview=importPreview(gF, ui.imp.year); break;
     case 'impStartOpen': ui.imp={mode:'start', year:'auto', text:'', preview:null, grid:null, roster:null}; break;
     case 'impStart':
       var ctxS=livePeople().length?'people':'welcome';
@@ -2067,7 +2085,8 @@ document.addEventListener('click', function(ev){
       if(opM){ if(ctxS==='welcome'){ ui.wopen=opM; ui.wopenDecided=false; } else if((D.settings.openPrayer||'chair')!==opM) setOpenMode(opM,true); }
       ui.imp=null; if(ctxS==='people'){ ui.tab='people'; ui.pview='list'; } break;
     case 'impApply':
-      var pvA=ui.imp.preview, addLive=!!(document.getElementById('impAddLive')||{}).checked, newF=pvA.unknown.filter(isNameLike), nF=0;
+      var pvA=ui.imp.preview, addLive=!!(document.getElementById('impAddLive')||{}).checked, keepF=!ui.imp.ocr || addLive || !!(document.getElementById('impKeepFormer')||{}).checked;
+      var newF=keepF?pvA.unknown.filter(isNameLike):[], nF=0;
       if(newF.length){
         // 명단에 없는 사람: 그 당시 성원으로 만들어 기록에 연결 (지금 명단에 넣기를 골랐으면 활동 성원으로)
         var gmap={}; inferRoster(ui.imp.grid).list.forEach(function(r){ gmap[r.name]=r.group; });
