@@ -1334,10 +1334,7 @@ function buildImportedWeek(date, items, nameId){
 function importPreview(grid, year0){
   var raw=parseGrid(grid), nameId={}, names=[];
   D.people.filter(function(p){ return p.deleted; }).concat(livePeople()).forEach(function(p){ var k=p.name.replace(/\s+/g,''); nameId[k]=p.id; if(names.indexOf(k)<0) names.push(k); });
-  var fuzzy={};
-  raw.forEach(function(x){ x.items.forEach(function(it){ [it.name,it.asst].forEach(function(n){ n=(n||'').replace(/\s+/g,''); if(!n || nameId[n] || n.length<2) return;
-    var hit=names.filter(function(k){ if(k.length!==n.length) return false; var d=0; for(var i=0;i<k.length;i++) if(k[i]!==n[i]) d++; return d===1; });
-    if(hit.length===1){ nameId[n]=nameId[hit[0]]; fuzzy[n]=hit[0]; } }); }); });
+  var fuzzy={}; // 비슷한 이름 자동 연결은 쓰지 않음 (이름은 파일에 적힌 그대로만 맞춤)
   if(!raw.length) return {weeks:[], unknown:[], total:0};
   var firstM=raw.map(function(x){return x.m}).reduce(function(a,b){ return Math.min(a,b); });
   var minM=raw[0].m;
@@ -1535,7 +1532,6 @@ function renderImport(){
           return (pp.length?'<span>지금 명단에 없는 이름 '+pp.length+'명: '+esc(pp.slice(0,20).join(', '))+(pp.length>20?' …':'')+'<br><b>그 당시 성원</b>으로 기록에 남겨요. 통계에는 잡히고, 앞으로의 자동 배정에는 들어가지 않아요.</span>'+
             '<label class="note" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="impAddLive"'+(I.addLive?' checked':'')+'> 이 사람들을 지금 명단에도 넣기 (지금도 있는 사람이면 체크)</label>':'')+
             (junk.length?'<span style="color:var(--warn)">이름으로 보기 어려운 글자 '+junk.length+'개: '+esc(junk.slice(0,10).join(', '))+' — 글자 그대로 들어가요. 틀리게 읽힌 것이면 위 칸에서 고쳐 주세요.</span>':''); })():'')+
-        (Object.keys(pv.fuzzy||{}).length?'<span>비슷한 이름으로 연결: '+esc(Object.keys(pv.fuzzy).map(function(k){ return k+'→'+pv.fuzzy[k]; }).join(', '))+'</span>':'')+
         (futureN?'<span>이 중 <b>앞으로의 주 '+futureN+'주</b>는 미리 짜 둔 계획으로 그대로 넣어요.'+(existF?' 여기서 자동으로 짜 둔 '+existF+'주는 파일 내용으로 바뀌어요.':'')+'</span>':'')+
         (exist?'<span>이미 있는 지난 '+exist+'주도 가져온 내용으로 바뀌어요.</span>':'')+'</div>';
       h+='<div class="hist">'+pv.weeks.map(function(w){ var ch=w.parts[0]; return '<span>'+wd(w.date)+' 사회 '+esc(nameOf(ch.main)||'-')+'</span>'; }).join('')+'</div>';
