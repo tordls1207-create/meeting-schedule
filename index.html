@@ -402,10 +402,14 @@ textarea.copy{width:100%;height:220px;font-size:12px;border:1px solid var(--line
 
   // 그 달의 모임 요일 날짜 목록 (weekday: 0=일 … 6=토)
   function meetingDates(year, month, weekday) {
-    var out = [];
+    // 주(월~일)의 월요일이 이 달에 있는 주만 이 달로 셈. 모임 날짜 = 그 주 월요일 + 요일만큼
+    var out = [], off = (weekday + 6) % 7;
     var last = new Date(Date.UTC(year, month, 0)).getUTCDate();
     for (var d = 1; d <= last; d++) {
-      if (new Date(Date.UTC(year, month - 1, d)).getUTCDay() === weekday) out.push(iso(year, month, d));
+      var t = new Date(Date.UTC(year, month - 1, d));
+      if (t.getUTCDay() !== 1) continue;
+      t.setUTCDate(t.getUTCDate() + off);
+      out.push(t.toISOString().slice(0, 10));
     }
     return out;
   }
@@ -696,6 +700,7 @@ async function load(){
   if(local && (!remote || (local.savedAt||'') > (remote.savedAt||''))){ D=local; dirty=!!remote; }
   else D=remote||blank();
   D.settings=D.settings||{weekday:2}; D.people=D.people||[]; D.months=D.months||{};
+  var regrouped=regroupMonths(); if(regrouped) dirty=true;
   var keys=monthKeys();
   ui.month = keys[keys.length-1] || null;
   render();
@@ -740,7 +745,7 @@ async function fsOpen(){
     var nd=JSON.parse(await (await h.getFile()).text());
     if(!nd || !Array.isArray(nd.people) || typeof nd.months!=='object') throw new Error('bad');
     var perm='prompt'; try{ perm=await h.requestPermission({mode:'readwrite'}); }catch(e){}
-    D=nd; D.settings=D.settings||{weekday:2}; ui.month=monthKeys().slice(-1)[0]||null; ui.tab='plan'; ui.draft=null;
+    D=nd; D.settings=D.settings||{weekday:2}; regroupMonths(); ui.month=monthKeys().slice(-1)[0]||null; ui.tab='plan'; ui.draft=null;
     FS.handle=h; FS.name=h.name; FS.state=perm==='granted'?'on':'need'; await idbSet(h);
     changed(); render(); toast(h.name+' 파일을 불러왔어요'+(FS.state==='on'?'. 앞으로 이 파일에 자동 저장돼요':''));
   }catch(e){ if(!(e&&e.name==='AbortError')) toast('이 파일은 임명표 파일이 아니에요'); }
@@ -1311,12 +1316,23 @@ function inferRoster(grid){
   var list=order.map(function(n){ return {name:n, group:grp[n], have:!!haveN[n]}; }).sort(function(a,b){ return (ord[a.group]-ord[b.group]) || a.name.localeCompare(b.name,'ko'); });
   return {weeks:raw.length, list:list};
 }
+// 모든 주를 그 주 월요일이 속한 달로 옮김 (예전 데이터 정리용)
+function regroupMonths(){
+  var moved=0, all=[];
+  Object.keys(D.months).forEach(function(k){ var M=D.months[k]; (M.weeks||[]).forEach(function(w){ all.push({w:w, from:k, ready:M.ready}); }); });
+  var out={};
+  all.forEach(function(x){ var k=mondayKey(x.w.date).slice(0,7); if(k!==x.from) moved++;
+    var M=out[k]||(out[k]={weeks:[], ready:false}); M.weeks.push(x.w); if(x.ready) M.ready=true; });
+  if(!moved) return 0;
+  Object.keys(out).forEach(function(k){ out[k].weeks.sort(function(a,b){ return a.date<b.date?-1:1; }); });
+  D.months=out; return moved;
+}
 function monthAfterToday(){ var t=new Date(), y=t.getFullYear(), m=t.getMonth()+2; if(m>12){ m=1; y++; } return y+'-'+('0'+m).slice(-2); }
 
 function applyImport(weeks){
   var n=0;
   weeks.forEach(function(wk){
-    var k=wk.date.slice(0,7); var M=D.months[k]||(D.months[k]={weeks:[]});
+    var k=mondayKey(wk.date).slice(0,7); var M=D.months[k]||(D.months[k]={weeks:[]});
     var at=-1; M.weeks.forEach(function(w,i){ if(mondayKey(w.date)===mondayKey(wk.date)) at=i; });
     if(at>=0) M.weeks[at]=wk; else M.weeks.push(wk);
     M.weeks.sort(function(a,b){ return a.date<b.date?-1:1; }); M.ready=true; n++;
@@ -1773,10 +1789,12 @@ document.addEventListener('click', function(ev){
           if(impN){ ui.month=pvS.weeks[pvS.weeks.length-1].date.slice(0,7); ui.tab='plan'; ui.wed=null; ui.confirm=null; ui.fsHint=true;
             changed(); toast(rows.length+'명과 임명표 '+impN+'주를 그대로 넣었어요. 다음 달은 “＋ 추가”를 누르면 이 기록을 보고 짜요'); break; }
         }
-        var k1=monthAfterToday();
-        if(!D.months[k1]){ var p1=k1.split('-'); D.months[k1]=Sx.makeMonth(+p1[0],+p1[1],D.settings.weekday); applyProgramsToMonth(k1,false); }
-        ui.month=k1; ui.tab='plan'; ui.wed=null; ui.confirm=null; ui.fsHint=true;
-        var rr=Sx.autoAssign(D, ui.month, {});
+        // 첫 계획: 이번 주부터. 이번 달에 남은 주가 1주뿐이면 다음 달도 같이 만듦
+        var tdy=today(), kA=mondayKey(tdy).slice(0,7), made=[];
+        if(!D.months[kA]){ var pA=kA.split('-'), MA=Sx.makeMonth(+pA[0],+pA[1],D.settings.weekday); MA.weeks=MA.weeks.filter(function(w){ return w.date>=tdy; }); if(MA.weeks.length){ D.months[kA]=MA; applyProgramsToMonth(kA,false); made.push(kA); } }
+        if(!D.months[kA] || D.months[kA].weeks.length<2){ var kB=nextMonthKey(), pB=kB.split('-'); if(!D.months[kB]){ D.months[kB]=Sx.makeMonth(+pB[0],+pB[1],D.settings.weekday); applyProgramsToMonth(kB,false); made.push(kB); } }
+        var rr={empty:0}; made.forEach(function(k){ var r1=Sx.autoAssign(D,k,{}); rr.empty+=r1.empty; });
+        ui.month=made[made.length-1]||monthKeys().slice(-1)[0]; ui.tab='plan'; ui.wed=null; ui.confirm=null; ui.fsHint=true;
         changed(); toast(rows.length+'명'+(impN?', 지난 '+impN+'주 기록':'')+'으로 '+mlabel(ui.month)+' 계획표를 만들었어요'+(rr.empty?' · 맡을 사람이 없어 '+rr.empty+'칸이 비었어요':'')); break;
       }
       changed(); toast(rows.length+'명을 넣었어요. 다음 자동 배정부터 들어가요'); break;
@@ -1864,7 +1882,7 @@ document.addEventListener('click', function(ev){
           D.people.push({id:Sx.uid('u'), name:n, gender:G.gender, group:g, roles:G.roles.slice(), active:addLive, away:[], note:'', deleted:!addLive, former:!addLive}); nF++; });
         pvA=importPreview(ui.imp.grid, ui.imp.year);
       }
-      var impW=pvA.weeks, nI=applyImport(impW), lastK=impW[impW.length-1].date.slice(0,7);
+      var impW=pvA.weeks, nI=applyImport(impW), lastK=mondayKey(impW[impW.length-1].date).slice(0,7);
       ui.imp=null; ui.month=lastK; ui.tab='plan'; changed(); toast(nI+'주를 가져온 그대로 넣었어요'+(nF?' · '+(addLive?'명단에 '+nF+'명 추가':'그 당시 성원 '+nF+'명 기록'):'')+'. 앞으로 새로 짜는 달부터 이 기록을 보고 배정해요'); break;
     case 'fsLater': ui.fsHint=false; D.settings.fsLater=true; changed(); break;
     case 'auto':
@@ -2003,7 +2021,8 @@ document.addEventListener('change', function(ev){
       if(livePeople().some(function(q){ return q!==np && q.name.trim()===nv; })){ toast('같은 이름이 이미 있어요'); render(); return; }
       if(np.name!==nv){ np.name=nv; changed(); }
       render(); return;
-    case 'wedDate': if(el.value){ var wk=wedWeek(); wk.date=el.value; M.weeks.sort(function(a,b){return a.date<b.date?-1:1}); ui.wed=M.weeks.indexOf(wk); } break;
+    case 'wedDate': if(el.value){ var wk=wedWeek(); wk.date=el.value; M.weeks.sort(function(a,b){return a.date<b.date?-1:1}); ui.wed=M.weeks.indexOf(wk);
+      if(regroupMonths()){ ui.wed=null; ui.month=mondayKey(wk.date).slice(0,7); toast('그 주는 '+mlabel(ui.month)+'로 옮겼어요'); } } break;
     case 'wedNote': wedWeek().note=el.value.trim(); break;
     case 'wedCoName': wedWeek().parts[+el.dataset.p].text=el.value.trim(); break;
     case 'wedTitle': o=wedWeek().parts[+el.dataset.p]; o.title=joinTitle(el.value||(o.sec===3?'생활 파트':'학생 과제'), splitTitle(o.title).min); break;
@@ -2025,7 +2044,7 @@ document.addEventListener('change', function(ev){
     case 'restore':
       var f=el.files&&el.files[0]; if(!f) return;
       f.text().then(function(txt){ try{ var nd=JSON.parse(txt); if(!nd||!Array.isArray(nd.people)||typeof nd.months!=='object') throw 0;
-        D=nd; D.settings=D.settings||{weekday:2}; ui.month=monthKeys().slice(-1)[0]||null; ui.tab='plan'; changed(); render(); toast('백업을 불러왔어요'); }catch(e){ toast('이 파일은 임명표 백업이 아니에요'); } });
+        D=nd; D.settings=D.settings||{weekday:2}; regroupMonths(); ui.month=monthKeys().slice(-1)[0]||null; ui.tab='plan'; changed(); render(); toast('백업을 불러왔어요'); }catch(e){ toast('이 파일은 임명표 백업이 아니에요'); } });
       return;
     default: return;
   }
