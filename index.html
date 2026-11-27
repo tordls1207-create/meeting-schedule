@@ -279,7 +279,7 @@ table.plist td .na{color:var(--line)}
 .sc-row{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}
 .sc-lab{font-family:var(--font-ui);font-weight:700;font-size:12px;color:var(--muted);width:2.8em;flex:none}
 .sc-range{font-size:13px;font-weight:600;color:var(--accent)}
-.sgrid.stud{table-layout:fixed}
+.sgrid.stud{table-layout:auto}
 .sgrid.stud th.nmcol,.sgrid.stud td.nmcol{width:64px}
 .sgrid.stud th.st,.sgrid.stud td.st,.sgrid.stud th.sa,.sgrid.stud td.sa{width:76px;text-align:left;padding:5px 6px}
 .sgrid.stud td.st,.sgrid.stud th.st,.sgrid.stud th.grp{border-left:2px solid var(--line)}
@@ -571,10 +571,11 @@ textarea.copy{width:100%;height:220px;font-size:12px;border:1px solid var(--line
     var month = data.months[monthKey];
     if (!month) return { filled: 0, empty: 0 };
     var rng = mulberry32(opts.seed != null ? opts.seed : Date.now() % 2147483647);
+    var FILL = data.settings && data.settings.openPrayer === 'separate' ? ['main', 'asst', 'openPrayer'] : ['main', 'asst'];
     month.weeks.forEach(function (w) {
       if (w.skip || opts.keepFilled) return;
       w.parts.forEach(function (p) {
-        ['main', 'asst'].forEach(function (slot) {
+        FILL.forEach(function (slot) {
           if (slotRole(p, slot) && !(p.lock && p.lock[slot])) p[slot] = null;
         });
       });
@@ -584,7 +585,7 @@ textarea.copy{width:100%;height:220px;font-size:12px;border:1px solid var(--line
     month.weeks.slice().sort(function (a, b) { return a.date < b.date ? -1 : 1; }).forEach(function (w) {
       if (w.skip) return;
       w.parts.forEach(function (p) {
-        ['main', 'asst'].forEach(function (slot) {
+        FILL.forEach(function (slot) {
           var role = slotRole(p, slot);
           if (!role || p[slot] || (p.lock && p.lock[slot])) return;
           var list = rank(data, events, w, p, slot, { rng: rng });
@@ -611,7 +612,7 @@ textarea.copy{width:100%;height:220px;font-size:12px;border:1px solid var(--line
         if (!role) return;
         var key = p.id + ':' + slot;
         var pid = p[slot];
-        if (!pid) { if (slot !== 'openPrayer' && !(p.lock && p.lock[slot])) out[key] = '빈칸'; return; }
+        if (!pid) { if ((slot !== 'openPrayer' || (data.settings && data.settings.openPrayer === 'separate')) && !(p.lock && p.lock[slot])) out[key] = '빈칸'; return; }
         var person = pm[pid];
         if (!person) { if (String(pid).indexOf('txt:') !== 0) out[key] = '명단에 없음'; return; }
         if (used[pid] > 1) out[key] = '같은 주 중복';
@@ -942,8 +943,10 @@ function renderWeek(w,wi){
       h+='<div class="c date">'+dateBtn(w,wi)+'</div>';
       h+='<div class="c title"><span class="t">'+esc(p.title)+'</span></div><div class="c mainc">'+nameBtn(w,wi,p,pi,'main',iss)+'</div><div class="c"></div>';
       var opIss=iss[p.id+':openPrayer'];
+      var sepMode=D.settings.openPrayer==='separate';
       h+='<div class="c title">시작 기도</div><div class="c mainc">'+(p.openPrayer
-        ? '<button class="nm'+(opIss?' issue':'')+'" data-act="pick" data-w="'+wi+'" data-p="'+pi+'" data-s="openPrayer" title="'+esc(opIss||'')+'">'+esc(nameOf(p.openPrayer))+'<span class="lk" aria-label="고정">📌</span></button>'+(opIss?'<span class="iss">'+esc(opIss)+'</span>':'')
+        ? '<button class="nm'+(opIss?' issue':'')+'" data-act="pick" data-w="'+wi+'" data-p="'+pi+'" data-s="openPrayer" title="'+esc(opIss||'')+'">'+esc(nameOf(p.openPrayer))+(p.lock&&p.lock.openPrayer?'<span class="lk" aria-label="고정">📌</span>':'')+'</button>'+(opIss?'<span class="iss">'+esc(opIss)+'</span>':'')
+        : sepMode ? '<button class="nm empty" data-act="pick" data-w="'+wi+'" data-p="'+pi+'" data-s="openPrayer">＋ 배정</button>'
         : '<button class="nm asst" data-act="pick" data-w="'+wi+'" data-p="'+pi+'" data-s="openPrayer" title="누르면 다른 사람으로 바꿀 수 있어요">'+esc(p.main&&people[p.main]?people[p.main].name:'사회자')+'</button>')+'</div><div class="c"></div>';
       return;
     }
@@ -1120,22 +1123,21 @@ function renderExport(){
 function renderStudentGrid(keys){
   var hi=ui.statHi, cnt=0, maxN=1;
   keys.forEach(function(k){ D.months[k].weeks.forEach(function(w){ if(!w.skip){ var n=w.parts.filter(function(p){ return p.sec===2; }).length; if(n>maxN) maxN=n; } }); });
-  var nb=function(id,cls){ if(!id) return '<span class="none">–</span>'; if(id===hi) cnt++; return '<button class="gn'+(id===hi?' hi':'')+(cls?' '+cls:'')+'" data-act="statHi" data-v="'+esc(id)+'">'+esc(nameOf(id))+'</button>'; };
-  var span=maxN*2, body='';
+  var nb=function(id,cls){ if(!id) return ''; if(id===hi) cnt++; return '<button class="gn'+(id===hi?' hi':'')+(cls?' '+cls:'')+'" data-act="statHi" data-v="'+esc(id)+'">'+esc(nameOf(id))+'</button>'; };
+  var body='';
   keys.forEach(function(k){
-    body+='<tr class="mrow"><td class="nmcol">'+esc(mlabel(k))+'</td><td colspan="'+span+'"></td></tr>';
+    body+='<tr class="mrow"><td class="nmcol">'+esc(mlabel(k))+'</td><td colspan="'+maxN+'"></td></tr>';
     D.months[k].weeks.forEach(function(w){
-      if(w.skip){ body+='<tr><td class="nmcol"><b>'+wd(w.date)+'</b></td><td colspan="'+span+'" class="note" style="text-align:left">모임 없음'+(w.note?' · '+esc(w.note):'')+'</td></tr>'; return; }
+      if(w.skip){ body+='<tr><td class="nmcol"><b>'+wd(w.date)+'</b></td><td colspan="'+maxN+'" class="note" style="text-align:left">모임 없음'+(w.note?' · '+esc(w.note):'')+'</td></tr>'; return; }
       var s2=w.parts.filter(function(p){ return p.sec===2; }), cells='';
-      for(var i=0;i<maxN;i++){ var p=s2[i], hasA=p&&Sx.slotRole(p,'asst');
-        cells+='<td class="st">'+(p?nb(p.main):'')+'</td><td class="sa">'+(p?(hasA?nb(p.asst,'asn'):'<span class="none">혼자</span>'):'')+'</td>'; }
+      for(var i=0;i<maxN;i++){ var p=s2[i];
+        cells+='<td class="sc">'+(p?'<span class="pair">'+nb(p.main)+(Sx.slotRole(p,'asst')&&p.asst?'<span class="sep">·</span>'+nb(p.asst,'asn'):'')+'</span>':'')+'</td>'; }
       body+='<tr><td class="nmcol"><b>'+wd(w.date)+'</b></td>'+cells+'</tr>';
     });
   });
-  var h1='', h2='';
-  for(var i=1;i<=maxN;i++){ h1+='<th colspan="2" class="grp">과제 '+(i+3)+'번</th>'; h2+='<th class="st">실연</th><th class="sa">보조자</th>'; }
-  var h='<p class="hint">'+(hi?'<b>'+esc(nameOf(hi))+'</b> · 이 기간 학생 과제 '+cnt+'번 · 다시 누르면 표시가 꺼져요':'이름을 누르면 그 사람이 맡은 칸이 모두 표시돼요.')+'</p>';
-  return h+'<div class="tablewrap tall"><table class="stat sgrid stud"><thead><tr class="r1"><th class="nmcol" rowspan="2">날짜</th>'+h1+'</tr><tr class="r2">'+h2+'</tr></thead><tbody>'+body+'</tbody></table></div>';
+  var head=''; for(var i=1;i<=maxN;i++) head+='<th>과제 '+(i+3)+'번</th>';
+  var h='<p class="hint">'+(hi?'<b>'+esc(nameOf(hi))+'</b> · 이 기간 학생 과제 '+cnt+'번 · 다시 누르면 표시가 꺼져요':'칸마다 왼쪽이 실연, 오른쪽(흐린 글씨)이 보조자예요. 이름을 누르면 그 사람 칸이 모두 표시돼요.')+'</p>';
+  return h+'<div class="tablewrap tall"><table class="stat sgrid stud"><thead><tr><th class="nmcol">날짜</th>'+head+'</tr></thead><tbody>'+body+'</tbody></table></div>';
 }
 
 /* 통계 · 주별 표 (세로: 날짜, 가로: 파트) */
@@ -1148,7 +1150,7 @@ function statKeysOf(p,s){
   var r=Sx.slotRole(p,s); if(!r || !p[s]) return [];
   if(s==='openPrayer') return [{k:'openPrayer'}];
   if(p.kind==='prayer') return [{k:'closePrayer'}];
-  if(p.kind==='chair' && s==='main' && !p.openPrayer) return [{k:'chair'},{k:'openPrayer',imp:true}];
+  if(p.kind==='chair' && s==='main' && !p.openPrayer && D.settings.openPrayer!=='separate') return [{k:'chair'},{k:'openPrayer',imp:true}];
   return [{k:r}];
 }
 function gridRoles(){ return STAT_COLS.filter(function(r){ return !SCHOOL[r.key]; }); }
@@ -1346,27 +1348,29 @@ function parseGrid(g){
 function s2Known(t){ var n=splitTitle(t).name.replace(/^\d+\s*[.)]\s*/,''); return /^연설/.test(n) || S2_PRESETS.some(function(x){ return x[0]===n; }); }
 function isNameLike(n){ return /^[가-힣]{2,5}$/.test(n); }
 function buildImportedWeek(date, items, nameId){
-  var parts=[], sec=1, chair=null;
+  var parts=[], sec=1, chair=null, opSeen=null;
   var id=function(n){ n=(n||'').replace(/\s+/g,''); if(!n) return null; return nameId[n]||('txt:'+n); };
   items.forEach(function(it){
     var t=it.title.replace(/^\d+\s*[.)]\s*/,''), nm=id(it.name), as=id(it.asst), p;
     if(t.replace(/\s+/g,'')==='사회'){ chair=Sx.makePart('chair','사회'); chair.main=nm; chair.lock={main:true,asst:true}; parts.push(chair); return; }
-    if(/시작\s*기도/.test(t)){ if(chair && nm && nm!==chair.main) chair.openPrayer=nm; return; }
+    if(/시작\s*기도/.test(t)){ if(chair && nm){ if(nm!==chair.main){ chair.openPrayer=nm; opSeen='diff'; } else opSeen='same'; } return; }
     if(/마치는\s*기도/.test(t)) p=Sx.makePart('prayer','마치는 기도');
     else if(/영적\s*보물/.test(t)) p=Sx.makePart('gems',t);
     else if(/성경\s*낭독/.test(t)){ p=Sx.makePart('reading',t); sec=2; }
     else if(/회중\s*성서\s*연구/.test(t)){ p=Sx.makePart('cbs',t); p.asst=as; sec=3; }
     else if(/봉사\s*강연/.test(t)){ p=Sx.makePart('manual',t,3); p.text=it.name; sec=3; }
     else if(!parts.some(function(q){ return q.kind==='talk'; })) p=Sx.makePart('talk',t);
-    else if(sec===2 && s2Known(t)){ var k=s2Kind(splitTitle(t).name); p=Sx.makePart(k,t,2); if(k==='demo'){ if(as) p.asst=as; else p.noAsst=true; } }
+    else if(sec<=2 && s2Known(t) && (sec===2 || !/^연설/.test(splitTitle(t).name))){ sec=2; var k=s2Kind(splitTitle(t).name); p=Sx.makePart(k,t,2); if(k==='demo'){ if(as) p.asst=as; else p.noAsst=true; } }
     else { sec=3; p=Sx.makePart('living',t,3); }
     if(p.kind!=='manual') p.main=nm;
     p.lock={main:true,asst:true}; parts.push(p);
   });
   if(!chair) return null;
-  return {date:date, skip:false, note:'', parts:parts, edited:true, imported:true};
+  return {date:date, skip:false, note:'', parts:parts, edited:true, imported:true, _op:opSeen};
 }
 // 몇 년도 임명표인지: ① 표에 적힌 'YYYY년' ② 날짜의 요일이 모임 요일(또는 월요일)과 맞는 해 ③ 오늘 기준 가까운 해
+// 시작 기도를 사회자와 다른 사람이 한 주가 더 많으면 “따로 배정” 회중
+function openModeOf(weeks){ var d=0, sm=0; weeks.forEach(function(w){ if(w._op==='diff') d++; else if(w._op==='same') sm++; }); if(!d && !sm) return null; return d>sm?'separate':'chair'; }
 function detectYear(grid, raw){
   var cnt={};
   grid.forEach(function(r){ (r||[]).forEach(function(v){ var t=cstr(v), m, re=/(20\d{2})\s*년/g; while((m=re.exec(t))) cnt[m[1]]=(cnt[m[1]]||0)+1; }); });
@@ -1396,7 +1400,8 @@ function importPreview(grid, year0){
     weeks.push(wk);
   });
   weeks.sort(function(a,b){ return a.date<b.date?-1:1; });
-  return {weeks:weeks, unknown:Object.keys(unknown), total:total, matched:matched, fuzzy:fuzzy, yearWhy:yearWhy};
+  var opMode=openModeOf(weeks); weeks.forEach(function(w){ delete w._op; });
+  return {weeks:weeks, unknown:Object.keys(unknown), total:total, matched:matched, fuzzy:fuzzy, yearWhy:yearWhy, opMode:opMode};
 }
 // 옛날 임명표에 나온 이름과, 그 사람이 했던 파트로 구분을 추측
 function inferRoster(grid){
@@ -1418,7 +1423,8 @@ function inferRoster(grid){
   var ord={}; Sx.GROUPS.forEach(function(g,i){ ord[g.key]=i; });
   var haveN={}; livePeople().forEach(function(q){ haveN[q.name.replace(/\s+/g,'')]=1; });
   var list=order.map(function(n){ return {name:n, group:grp[n], have:!!haveN[n]}; }).sort(function(a,b){ return (ord[a.group]-ord[b.group]) || a.name.localeCompare(b.name,'ko'); });
-  return {weeks:raw.length, list:list};
+  var wks=raw.map(function(x){ return buildImportedWeek('2000-01-01', x.items, {}); }).filter(Boolean);
+  return {weeks:raw.length, list:list, opMode:openModeOf(wks)};
 }
 // 모든 주를 그 주 월요일이 속한 달로 옮김 (예전 데이터 정리용)
 function regroupMonths(){
@@ -1430,6 +1436,19 @@ function regroupMonths(){
   if(!moved) return 0;
   Object.keys(out).forEach(function(k){ out[k].weeks.sort(function(a,b){ return a.date<b.date?-1:1; }); });
   D.months=out; return moved;
+}
+// 시작 기도 방식 바꾸기: 앞으로의 확정 안 한 달에 반영 (직접 고른 📌 칸은 그대로)
+function setOpenMode(mode, announce){
+  if((D.settings.openPrayer||'chair')===mode) return;
+  D.settings.openPrayer=mode; var t=today(), n=0;
+  monthKeys().forEach(function(k){ var M=D.months[k]; if(monthState(M).confirmed) return;
+    var touched=false;
+    M.weeks.forEach(function(w){ if(w.date<t || w.skip) return; w.parts.forEach(function(p){ if(p.kind!=='chair') return;
+      if(mode==='chair' && p.openPrayer && !(p.lock&&p.lock.openPrayer)){ p.openPrayer=null; touched=true; }
+      if(mode==='separate' && !p.openPrayer) touched=true; }); });
+    if(touched){ if(mode==='separate') Sx.autoAssign(D,k,{keepFilled:true}); n++; } });
+  changed();
+  if(announce) toast(mode==='separate'?'시작 기도를 따로 배정해요'+(n?' · 앞으로의 '+n+'개 달에 채웠어요':''):'시작 기도는 사회자가 해요');
 }
 function monthAfterToday(){ var t=new Date(), y=t.getFullYear(), m=t.getMonth()+2; if(m>12){ m=1; y++; } return y+'-'+('0'+m).slice(-2); }
 
@@ -1581,7 +1600,8 @@ function renderImport(){
             '<label class="note" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="impAddLive"'+(I.addLive?' checked':'')+'> 이 사람들을 지금 명단에도 넣기 (지금도 있는 사람이면 체크)</label>':'')+
             (junk.length?'<span style="color:var(--warn)">이름으로 보기 어려운 글자 '+junk.length+'개: '+esc(junk.slice(0,10).join(', '))+' — 글자 그대로 들어가요. 틀리게 읽힌 것이면 위 칸에서 고쳐 주세요.</span>':''); })():'')+
         (futureN?'<span>이 중 <b>앞으로의 주 '+futureN+'주</b>는 미리 짜 둔 계획으로 그대로 넣어요.'+(existF?' 여기서 자동으로 짜 둔 '+existF+'주는 파일 내용으로 바뀌어요.':'')+'</span>':'')+
-        (exist?'<span>이미 있는 지난 '+exist+'주도 가져온 내용으로 바뀌어요.</span>':'')+'</div>';
+        (exist?'<span>이미 있는 지난 '+exist+'주도 가져온 내용으로 바뀌어요.</span>':'')+
+        (pv.opMode?'<span>시작 기도: 이 임명표는 <b>'+(pv.opMode==='separate'?'사회자와 다른 사람이 따로':'사회자가 함께')+'</b> 했어요.'+((D.settings.openPrayer||'chair')!==pv.opMode?' 가져오면 회중 설정도 이렇게 바꿔요.':'')+'</span>':'')+'</div>';
       h+='<div class="hist">'+pv.weeks.map(function(w){ var ch=w.parts[0]; return '<span>'+wd(w.date)+' 사회 '+esc(nameOf(ch.main)||'-')+'</span>'; }).join('')+'</div>';
     }
   }
@@ -1632,6 +1652,8 @@ function renderWelcome(){
   var h='<div style="max-width:760px"><div class="panel welcome" style="max-width:none"><h2>새 회중 시작하기</h2>';
   h+='<p>회중마다 이 파일을 따로 씁니다. 명단과 계획표는 이 컴퓨터의 브라우저에만 저장되고 다른 곳으로 보내지지 않아요.</p>';
   h+='<div class="field"><label for="wCong">회중 이름</label><input type="text" id="wCong" data-act="wcong" value="'+esc(ui.wcong||'')+'" placeholder="예: 서울 중앙" style="flex:1"></div>';
+  var wop=ui.wopen||'chair';
+  h+='<div class="field"><span>시작 기도</span><span class="seg gseg"><button data-act="wOpen" data-v="chair" aria-pressed="'+(wop==='chair')+'">사회자가 함</button><button data-act="wOpen" data-v="separate" aria-pressed="'+(wop==='separate')+'">따로 배정</button></span>'+(ui.wopenWhy?'<span class="note">'+esc(ui.wopenWhy)+'</span>':'')+'</div>';
   h+='<div class="field"><label for="wWd">모임 요일</label><select id="wWd" data-act="wwd">'+WD.map(function(d,i){return '<option value="'+i+'"'+(i===(ui.wwd!=null?ui.wwd:2)?' selected':'')+'>'+d+'요일</option>'}).join('')+'</select></div></div>';
   if(false) h+='<div class="callout"><span>옛날 임명표에서 <b>'+ui.pendingImport.weeks+'주 기록</b>을 읽었어요. 아래 명단의 구분(“추측” 표시)이 맞는지 확인하고 <b>명단 만들고 시작하기</b>를 누르면 기록도 함께 들어가요.</span><button class="btn" data-act="impCancel">취소</button></div>';
   else h+='<div class="callout"><span>예전에 쓰던 임명표(엑셀·구글 시트)가 있으면 이름을 하나하나 칠 필요 없어요.</span><button class="btn primary" data-act="impStartOpen">옛날 임명표에서 이름 가져오기</button></div>';
@@ -1709,6 +1731,8 @@ function renderSettings(){
   var h='<div class="panel"><h2>기본 설정</h2>';
   h+='<div class="field"><label for="setCong">회중 이름</label><input type="text" id="setCong" data-act="setCong" value="'+esc(D.settings.cong||'')+'" style="flex:1"></div>';
   h+='<div class="field"><label for="setTitle">계획표 제목</label><input type="text" id="setTitle" data-act="setTitle" value="'+esc(D.settings.title||'')+'" style="flex:1"></div>';
+  var opm=D.settings.openPrayer==='separate'?'separate':'chair';
+  h+='<div class="field"><span>시작 기도</span><span class="seg gseg"><button data-act="setOpen" data-v="chair" aria-pressed="'+(opm==='chair')+'">사회자가 함</button><button data-act="setOpen" data-v="separate" aria-pressed="'+(opm==='separate')+'">따로 배정</button></span><span class="note">회중마다 달라요. “따로 배정”이면 자동 배정이 시작 기도도 다른 사람으로 정해요.</span></div>';
   h+='<div class="field"><label for="setWd">모임 요일</label><select id="setWd" data-act="setWd">'+WD.map(function(d,i){return '<option value="'+i+'"'+(D.settings.weekday===i?' selected':'')+'>'+d+'요일</option>'}).join('')+'</select><span class="note">새 달을 추가할 때 이 요일 날짜로 주가 만들어져요.</span></div></div>';
   h+='<div class="panel"><h2>자동 배정 기준</h2><ul>'+
     '<li>명단의 구분(장로 · 봉사의 종 · 전도인 · 자매)에 맞는 파트만 고릅니다. 형제 전용 역할은 형제만, 학생 과제의 보조자는 학생과 같은 성별만 고릅니다.</li>'+
@@ -1743,7 +1767,7 @@ function monthRows(k){
     var n=0;
     w.parts.forEach(function(p){
       var main=p.kind==='manual'?p.text:nameOf(p.main), asst=Sx.slotRole(p,'asst')?nameOf(p.asst):'';
-      if(p.kind==='chair'){ rows.push({date:w.date,no:'',title:p.title,main:main,asst:''}); rows.push({date:w.date,no:'',title:'시작 기도',main:p.openPrayer?nameOf(p.openPrayer):main,asst:'',sep:!!p.openPrayer}); return; }
+      if(p.kind==='chair'){ rows.push({date:w.date,no:'',title:p.title,main:main,asst:''}); rows.push({date:w.date,no:'',title:'시작 기도',main:p.openPrayer?nameOf(p.openPrayer):(D.settings.openPrayer==='separate'?'':main),asst:'',sep:!!p.openPrayer||D.settings.openPrayer==='separate'}); return; }
       var no = (p.sec>=1&&p.sec<=3)?String(++n):'';
       rows.push({date:w.date,no:no,sec:p.sec,title:p.title,main:main,asst:asst});
     });
@@ -1899,7 +1923,7 @@ document.addEventListener('click', function(ev){
       if(!rows.length && !bad){ toast('이름을 한 명 이상 적어 주세요'); return; }
       if(bad){ ui.draftErr=true; toast('확인할 줄이 '+bad+'개 있어요. 빨간 줄을 고쳐 주세요'); break; }
       var welcome=ui.draftCtx==='welcome';
-      if(welcome){ D.settings.cong=(ui.wcong||'').trim(); D.settings.weekday=ui.wwd!=null?ui.wwd:2; }
+      if(welcome){ D.settings.cong=(ui.wcong||'').trim(); D.settings.weekday=ui.wwd!=null?ui.wwd:2; D.settings.openPrayer=ui.wopen||'chair'; }
       var newP=peopleFrom(rows); D.people=D.people.concat(newP); ui.draft=null;
       ui.justAdded={}; newP.forEach(function(q){ ui.justAdded[q.id]=1; });
       if(welcome){
@@ -1994,6 +2018,8 @@ document.addEventListener('click', function(ev){
       ui.draft=keepRows.concat(addL.map(function(r){ return {name:r.name, group:r.group, guess:true}; }));
       if(!ui.draft.length) ui.draft=[{name:'',group:null}];
       toast(addL.length?addL.length+'명을 아래 줄에 채웠어요. 구분을 확인하고 “명단'+(ctxS==='welcome'?' 만들고 시작하기':'에 넣기')+'”를 눌러 주세요':'새로 넣을 이름이 없어요. 모두 이미 명단에 있어요');
+      var opM=ui.imp.roster.opMode;
+      if(opM){ if(ctxS==='welcome'){ ui.wopen=opM; ui.wopenWhy='옛날 임명표를 보고 골랐어요'; } else if((D.settings.openPrayer||'chair')!==opM) setOpenMode(opM,true); }
       ui.imp=null; if(ctxS==='people'){ ui.tab='people'; ui.pview='list'; } break;
     case 'impApply':
       var pvA=ui.imp.preview, addLive=!!(document.getElementById('impAddLive')||{}).checked, newF=pvA.unknown.filter(isNameLike), nF=0;
@@ -2004,9 +2030,12 @@ document.addEventListener('click', function(ev){
           D.people.push({id:Sx.uid('u'), name:n, gender:G.gender, group:g, roles:G.roles.slice(), active:addLive, away:[], note:'', deleted:!addLive, former:!addLive}); nF++; });
         pvA=importPreview(ui.imp.grid, ui.imp.year);
       }
+      if(pvA.opMode && (D.settings.openPrayer||'chair')!==pvA.opMode) setOpenMode(pvA.opMode, false);
       var impW=pvA.weeks, nI=applyImport(impW), lastK=mondayKey(impW[impW.length-1].date).slice(0,7);
       ui.imp=null; ui.month=lastK; ui.tab='plan'; changed(); toast(nI+'주를 가져온 그대로 넣었어요'+(nF?' · '+(addLive?'명단에 '+nF+'명 추가':'그 당시 성원 '+nF+'명 기록'):'')+'. 앞으로 새로 짜는 달부터 이 기록을 보고 배정해요'); break;
     case 'bkLater': ui.bkLater=true; break;
+    case 'wOpen': ui.wopen=el.dataset.v; ui.wopenWhy=null; break;
+    case 'setOpen': setOpenMode(el.dataset.v, true); break;
     case 'fsLater': ui.fsHint=false; D.settings.fsLater=true; changed(); break;
     case 'auto':
       var r=Sx.autoAssign(D, ui.month, {});
