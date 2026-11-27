@@ -1287,8 +1287,37 @@ function detectOffsets(g, c, rowList){
   var n=mode(first)||1, a=mode(second); if(!a || a<=n) a=n+1;
   return {n:n, a:a};
 }
+// 한 줄에서 담당·보조 이름 뽑기: “보조”, “보조자:”, “(보조) 이름”, “이름 / 이름” 같은 표시도 읽음
+var ASST_LAB=/^(보조자?|보조\s*낭독|낭독자?)$/, MAIN_LAB=/^(학생|실연|사회자?|연사|담당자?)$/;
+function rowNames(row, c, limit){
+  var toks=[];
+  for(var k=c+1; k<=limit; k++){
+    var v=cstr(row[k]); if(!v) continue;
+    var bare=v.replace(/[:：\s]+$/,'').replace(/^\(|\)$/g,'');
+    if(ASST_LAB.test(bare)){ toks.push({lab:'a'}); continue; }
+    if(MAIN_LAB.test(bare)){ toks.push({lab:'m'}); continue; }
+    var labeled=/^[(\[]?\s*(보조자?|낭독자?|학생|실연)\s*[)\]]?\s*[:：]?\s*[가-힣]/.test(v) || /[(\[]\s*(보조자?|낭독자?)\s*[)\]]\s*$/.test(v);
+    if(!labeled && (NOT_NAME.test(v) || looksPart(v))) continue;
+    v.split(/\s*[\/·,]\s*/).forEach(function(piece){
+      var m=/^[(\[]?\s*(보조자?|낭독자?|학생|실연)\s*[)\]]?\s*[:：]?\s*(.+)$/.exec(piece);
+      if(m){ toks.push({lab:/보조|낭독/.test(m[1])?'a':'m'}); piece=m[2]; }
+      var am=/^(.+?)\s*[(\[]\s*(보조자?|낭독자?)\s*[)\]]$/.exec(piece);   // “이름(보조)”
+      if(am){ var nm0=cleanName(am[1]); if(nm0){ toks.push({lab:'a'}); toks.push({name:nm0}); } return; }
+      var nm=cleanName(piece); if(nm) toks.push({name:nm});
+    });
+  }
+  var main='', asst='', want=null;
+  toks.forEach(function(t){
+    if(t.lab){ want=t.lab; return; }
+    if(want==='a' && !asst){ asst=t.name; want=null; return; }
+    if(want==='m' && !main){ main=t.name; want=null; return; }
+    if(!main) main=t.name; else if(!asst) asst=t.name;
+  });
+  return {name:main, asst:asst};
+}
 function parseGrid(g){
   var out=[], rows=g.length, cols=0; g.forEach(function(r){ if(r.length>cols) cols=r.length; });
+  var titleCols=[]; for(var cc=0;cc<cols;cc++){ for(var r0=0;r0<rows;r0++){ if(cstr((g[r0]||[])[cc]).replace(/\s+/g,'')==='사회'){ titleCols.push(cc); break; } } }
   for(var c=0;c<cols;c++){ var colBlocks=[]; for(var r=0;r<rows;r++){
     if(cstr((g[r]||[])[c]).replace(/\s+/g,'')!=='사회') continue;
     var dt=findDate(g,r,c);
@@ -1299,9 +1328,10 @@ function parseGrid(g){
       tRows.push(rr);
       if(/마치는\s*기도/.test(t)) break;
     }
-    var off=detectOffsets(g, c, tRows);
-    var items=tRows.map(function(rr){ var row=g[rr]||[];
-      return {title:cstr(row[c]), name:cleanName(row[c+off.n]), asst:cleanName(row[c+off.a])}; });
+    var nextT=titleCols.filter(function(x){ return x>c; })[0], limit=nextT!=null?nextT-2:Math.min(cols-1,c+8);
+    if(limit<c+1) limit=c+1;
+    var items=tRows.map(function(rr){ var row=g[rr]||[], nm=rowNames(row,c,limit);
+      return {title:cstr(row[c]), name:nm.name, asst:nm.asst}; });
     colBlocks.push({m:dt?dt[0]:null, d:dt?dt[1]:null, items:items});
   }
   // 날짜를 못 읽은 주(사진 인식 등)는 앞뒤 주에서 7일씩 계산
