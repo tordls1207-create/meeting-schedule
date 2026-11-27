@@ -46,15 +46,20 @@ function parseWorkbook(html) {
     if (!pm || !sec) return;
     const name = pm[2].trim();
     const next = heads[i + 1] ? heads[i + 1].end : art.length;
-    const mm = /\(\s*(\d+)\s*분\s*\)/.exec(text(art.slice(h.end, next)));
+    const body = text(art.slice(h.end, next));
+    const mm = /\(\s*(\d+)\s*분\s*\)/.exec(body);
     const min = mm ? +mm[1] : null;
+    // 시간 뒤의 형식 (예: "(15분) 토의." → 토의, "동영상 및 토의")
+    const lm = /\(\s*\d+\s*분\s*\)\s*([^.(]{1,15})\./.exec(body);
+    const label = lm && /[가-힣]/.test(lm[1]) ? lm[1].trim() : null;
     if (sec === 1) { if (!out.s1.length) out.t1 = name; out.s1.push(min); } // t1: 10분 연설 주제
     else if (sec === 2) out.s2.push([name, min]);
     else if (/회중 성서 연구/.test(name)) out.cbs = min || 30;
     else if (/봉사 강연/.test(name)) out.co = [name, min || 30];
-    else out.s3.push([name, min]);
+    else out.s3.push([name, min, label]);
   });
   if (!out.s2.length && !out.s3.length) return null;
+  out.v = 2;
   return out;
 }
 
@@ -67,7 +72,7 @@ for (let i = 0; i < LOOKAHEAD; i++) {
   const lastWeek = isoWeekOf(new Date(Date.UTC(y, 11, 28))).week;
   if (w > lastWeek) { w -= lastWeek; y += 1; }
   const monday = isoWeekMonday(y, w);
-  if (data.weeks[monday] && data.weeks[monday].t1) continue; // 이미 있음
+  if (data.weeks[monday] && data.weeks[monday].v === 2) continue; // 이미 있음
   try {
     const page = await get(`${BASE}/ko/wol/meetings/r8/lp-ko/${y}/${w}`);
     const link = /href="(\/ko\/wol\/d\/r8\/lp-ko\/\d+)"[^>]*class="[^"]*pub-mwb/.exec(page);

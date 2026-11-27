@@ -271,6 +271,11 @@ table.plist td .na{color:var(--line)}
 .gn.hi{background:var(--accent);color:var(--accent-fg);font-weight:700}
 .fsbox{flex-direction:column;align-items:flex-start}
 .gtag{font-size:11px;border-radius:999px;padding:1px 7px;background:var(--warn-soft);color:var(--warn)}
+.sgrid.stud td.sc{text-align:left;min-width:150px}
+.sgrid.stud .pt{font-size:11px;color:var(--muted);margin-bottom:2px}
+.sgrid.stud .gn{margin:0}
+.sgrid.stud .as .gn{color:var(--muted);font-weight:400}
+.sgrid.stud .as .gn.hi{color:var(--accent-fg);font-weight:700}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;z-index:60}
 textarea.copy{width:100%;height:220px;font-size:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:8px}
 @media (prefers-reduced-motion:no-preference){.nm,.chip,.btn,.cand{transition:background-color .12s,border-color .12s}}
@@ -631,17 +636,19 @@ var PROG=null;
 function mondayKey(d){ var t=new Date(d+'T00:00:00Z'); t.setUTCDate(t.getUTCDate()-((t.getUTCDay()+6)%7)); return t.toISOString().slice(0,10); }
 function progFor(w){ return (PROG && PROG[mondayKey(w.date)]) || null; }
 function s2Kind(name){ var pre=S2_PRESETS.filter(function(x){return x[0]===name})[0]; var who=pre?pre[2]:(/연설/.test(name)?'talk':'pair'); return who==='talk'?'studentTalk':'demo'; }
+// 생활 파트 제목: 주제 대신 형식만 (예: 토의 (15분), 동영상 및 토의 (15분)), 회중의 필요는 그대로
+function livingTitle(it){ var nm=String(it[0]||''); return joinTitle(/회중의\s*필요/.test(nm)?'회중의 필요':(it[2]||'토의'), it[1]); }
 function applyProgram(w, pg){
   var old=w.parts.slice(), used=[];
   var take=function(pred){ for(var i=0;i<old.length;i++){ if(used.indexOf(i)<0 && pred(old[i])){ used.push(i); return old[i]; } } return null; };
   var keep=function(kind){ return take(function(p){ return p.kind===kind; }); };
   var out=[keep('chair')||Sx.makePart('chair','사회')];
   [['talk','연설'],['gems','영적 보물 찾기'],['reading','성경 낭독']].forEach(function(x,i){
-    var p=keep(x[0])||Sx.makePart(x[0],x[1]); p.title=joinTitle(i===0&&pg.t1?pg.t1:x[1], (pg.s1&&pg.s1[i])||splitTitle(p.title).min); out.push(p); });
+    var p=keep(x[0])||Sx.makePart(x[0],x[1]); p.title=joinTitle(x[1], (pg.s1&&pg.s1[i])||splitTitle(p.title).min); out.push(p); });
   (pg.s2||[]).forEach(function(it){ var kind=s2Kind(it[0]);
     var p=take(function(q){ return q.sec===2 && q.kind===kind; })||Sx.makePart(kind,'',2); p.title=joinTitle(it[0],it[1]); p.noAsst=false; out.push(p); });
   (pg.s3||[]).forEach(function(it){
-    var p=take(function(q){ return q.kind==='living'; })||Sx.makePart('living','',3); p.title=joinTitle(it[0],it[1]); out.push(p); });
+    var p=take(function(q){ return q.kind==='living'; })||Sx.makePart('living','',3); p.title=livingTitle(it); out.push(p); });
   if(pg.co){ var c=take(isCoPart)||Sx.makePart('manual','봉사 강연 (30분)',3); c.title=joinTitle(pg.co[0],pg.co[1]||30); out.push(c); if(!w.note) w.note='순회 감독자 방문'; }
   else { var b=keep('cbs')||Sx.makePart('cbs','회중 성서 연구 (30분)'); b.title=joinTitle('회중 성서 연구', pg.cbs||30); out.push(b); }
   out.push(keep('prayer')||Sx.makePart('prayer','마치는 기도'));
@@ -657,9 +664,12 @@ function applyProgramsToMonth(k, onlyNew){
     var pg=progFor(w); if(!pg) return;
     if(onlyNew && w.date<t) return;
     if(onlyNew && w.prog===mondayKey(w.date)){
-      // 이미 맞춘 주: 연설 주제만 새로 생겼으면 제목만 바꿈 (배정은 그대로)
-      var tk=w.parts.filter(function(q){return q.kind==='talk'})[0];
-      if(tk && pg.t1){ var nt=joinTitle(pg.t1,(pg.s1&&pg.s1[0])||10); if(tk.title!==nt){ tk.title=nt; n++; } }
+      // 이미 맞춘 주: 제목만 새 방식으로 바꿈 (배정은 그대로)
+      var ch=false, tk=w.parts.filter(function(q){return q.kind==='talk'})[0];
+      if(tk){ var nt=joinTitle('연설',(pg.s1&&pg.s1[0])||10); if(tk.title!==nt){ tk.title=nt; ch=true; } }
+      var lv=w.parts.filter(function(q){return q.kind==='living'});
+      (pg.s3||[]).forEach(function(it,k){ if(lv[k]){ var lt=livingTitle(it); if(lv[k].title!==lt){ lv[k].title=lt; ch=true; } } });
+      if(ch) n++;
       return;
     }
     applyProgram(w,pg); n++;
@@ -1073,23 +1083,46 @@ function renderExport(){
     '<footer><button class="btn primary" data-act="copyText">복사</button><span class="spacer"></span><button class="btn" data-act="closeExport">닫기</button></footer></div></div>';
 }
 
-/* 통계 · 주별 표 (세로: 날짜, 가로: 파트) */
-function renderStatGrid(keys){
-  var hi=ui.statHi, cnt=0, h='';
+/* 통계 · 학생 과제 표 (세로: 날짜, 가로: 봉사 파트 순서) */
+function renderStudentGrid(keys){
+  var hi=ui.statHi, cnt=0, maxN=1, rows=[];
+  keys.forEach(function(k){ D.months[k].weeks.forEach(function(w){ if(!w.skip){ var n=w.parts.filter(function(p){ return p.sec===2; }).length; if(n>maxN) maxN=n; } }); });
+  var nb=function(id){ if(!id) return ''; if(id===hi) cnt++; return '<button class="gn'+(id===hi?' hi':'')+'" data-act="statHi" data-v="'+esc(id)+'">'+esc(nameOf(id))+'</button>'; };
   var body='';
   keys.forEach(function(k){
-    body+='<tr class="mrow"><td class="nmcol">'+esc(mlabel(k))+'</td><td colspan="'+Sx.ROLES.length+'"></td></tr>';
+    body+='<tr class="mrow"><td class="nmcol">'+esc(mlabel(k))+'</td><td colspan="'+maxN+'"></td></tr>';
     D.months[k].weeks.forEach(function(w){
-      if(w.skip){ body+='<tr><td class="nmcol"><b>'+md(w.date)+'</b></td><td colspan="'+Sx.ROLES.length+'" class="note" style="text-align:left">모임 없음'+(w.note?' · '+esc(w.note):'')+'</td></tr>'; return; }
+      if(w.skip){ body+='<tr><td class="nmcol"><b>'+md(w.date)+'</b></td><td colspan="'+maxN+'" class="note" style="text-align:left">모임 없음'+(w.note?' · '+esc(w.note):'')+'</td></tr>'; return; }
+      var s2=w.parts.filter(function(p){ return p.sec===2; }), cells='';
+      for(var i=0;i<maxN;i++){ var p=s2[i];
+        cells+='<td class="sc">'+(p?'<div class="pt">'+esc(p.title)+'</div>'+nb(p.main)+(Sx.slotRole(p,'asst')?'<div class="as">'+nb(p.asst)+'</div>':''):'')+'</td>'; }
+      body+='<tr><td class="nmcol"><b>'+md(w.date)+'</b></td>'+cells+'</tr>';
+    });
+  });
+  var h='<p class="hint">'+(hi?'<b>'+esc(nameOf(hi))+'</b> · 이 기간 학생 과제 '+cnt+'번 · 다시 누르면 표시가 꺼져요':'봉사 파트(학생 과제·보조자·학생 연설)만 따로 모았어요. 위가 학생, 아래가 보조자예요. 이름을 누르면 그 사람 칸이 모두 표시돼요.')+'</p>';
+  var head=''; for(var i=1;i<=maxN;i++) head+='<th>봉사 파트 '+(i+3)+'</th>';
+  return h+'<div class="tablewrap"><table class="stat sgrid stud"><thead><tr><th class="nmcol">날짜</th>'+head+'</tr></thead><tbody>'+body+'</tbody></table></div>';
+}
+
+/* 통계 · 주별 표 (세로: 날짜, 가로: 파트) */
+var SCHOOL={student:1,assistant:1,studentTalk:1};
+function gridRoles(){ return Sx.ROLES.filter(function(r){ return !SCHOOL[r.key]; }); }
+function renderStatGrid(keys){
+  var hi=ui.statHi, cnt=0, h='', ROLES=gridRoles();
+  var body='';
+  keys.forEach(function(k){
+    body+='<tr class="mrow"><td class="nmcol">'+esc(mlabel(k))+'</td><td colspan="'+ROLES.length+'"></td></tr>';
+    D.months[k].weeks.forEach(function(w){
+      if(w.skip){ body+='<tr><td class="nmcol"><b>'+md(w.date)+'</b></td><td colspan="'+ROLES.length+'" class="note" style="text-align:left">모임 없음'+(w.note?' · '+esc(w.note):'')+'</td></tr>'; return; }
       var cell={};
       w.parts.forEach(function(p){ Sx.SLOTS.forEach(function(s){ var r=Sx.slotRole(p,s); if(!r||!p[s]) return; (cell[r]=cell[r]||[]).push(p[s]); }); });
-      body+='<tr><td class="nmcol"><b>'+md(w.date)+'</b></td>'+Sx.ROLES.map(function(r){
+      body+='<tr><td class="nmcol"><b>'+md(w.date)+'</b></td>'+ROLES.map(function(r){
         return '<td>'+(cell[r.key]||[]).map(function(id){ if(id===hi) cnt++;
           return '<button class="gn'+(id===hi?' hi':'')+'" data-act="statHi" data-v="'+esc(id)+'">'+esc(nameOf(id))+'</button>'; }).join('')+'</td>'; }).join('')+'</tr>';
     });
   });
   h+='<p class="hint">'+(hi?'<b>'+esc(nameOf(hi))+'</b> · 이 기간 '+cnt+'번 · 다시 누르면 표시가 꺼져요':'이름을 누르면 그 사람이 맡은 칸이 모두 표시돼요.')+'</p>';
-  h+='<div class="tablewrap"><table class="stat sgrid"><thead><tr><th class="nmcol">날짜</th>'+Sx.ROLES.map(function(r){ return '<th>'+esc(ROLE_SHORT[r.key])+'</th>'; }).join('')+'</tr></thead><tbody>'+body+'</tbody></table></div>';
+  h+='<div class="tablewrap"><table class="stat sgrid"><thead><tr><th class="nmcol">날짜</th>'+ROLES.map(function(r){ return '<th>'+esc(ROLE_SHORT[r.key])+'</th>'; }).join('')+'</tr></thead><tbody>'+body+'</tbody></table></div>';
   return h;
 }
 
@@ -1106,13 +1139,14 @@ function statKeys(){
 function renderStats(){
   var keys=statKeys(), all=monthKeys(), st=ui.stat;
   if(!all.length) return '<div class="callout">아직 계획표가 없어요. 계획표 탭에서 달을 추가하고 배정하면 여기에 횟수가 쌓여요.</div>';
-  var sub='<nav class="subtabs" role="tablist" aria-label="통계 보기">'+[['people','사람별 횟수'],['grid','주별 표']].map(function(t){
+  var sub='<nav class="subtabs" role="tablist" aria-label="통계 보기">'+[['people','사람별 횟수'],['grid','주별 표'],['student','학생 과제']].map(function(t){
     return '<button role="tab" data-act="statView" data-v="'+t[0]+'" aria-selected="'+((ui.statView||'people')===t[0])+'">'+t[1]+'</button>'; }).join('')+'</nav>';
   var h=sub+'<div class="bar">'+[['1','선택한 달'],['3','최근 3개월'],['6','최근 6개월'],['all','전체']].map(function(x){
     return '<button class="chip" data-act="statPreset" data-v="'+x[0]+'" aria-pressed="'+(st.preset===x[0])+'">'+x[1]+'</button>'; }).join('');
   var opt=function(sel){ return all.map(function(k){return '<option value="'+k+'"'+(k===sel?' selected':'')+'>'+mlabel(k)+'</option>'}).join(''); };
   h+='<span class="note" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap"><select data-act="statFrom" class="gsel" aria-label="시작 달">'+opt(keys[0])+'</select>부터<select data-act="statTo" class="gsel" aria-label="끝 달">'+opt(keys[keys.length-1])+'</select>까지</span></div>';
   if(ui.statView==='grid') return h+renderStatGrid(keys);
+  if(ui.statView==='student') return h+renderStudentGrid(keys);
   h+='<div class="bar">'+[['','전체']].concat(Sx.GROUPS.map(function(g){return [g.key,g.label]})).map(function(x){
     return '<button class="chip" data-act="statGroup" data-v="'+x[0]+'" aria-pressed="'+(st.group===x[0])+'">'+x[1]+'</button>'; }).join('')+'</div>';
   // 집계
