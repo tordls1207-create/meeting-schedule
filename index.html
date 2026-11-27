@@ -1187,18 +1187,25 @@ function findDate(g,r,c){
 // 표 안에서 “사회” 칸을 찾아, 그 오른쪽은 담당·보조, 아래로 마치는 기도까지를 한 주로 읽음 (두 달이 옆으로 붙어 있어도 됨)
 function parseGrid(g){
   var out=[], rows=g.length, cols=0; g.forEach(function(r){ if(r.length>cols) cols=r.length; });
-  for(var c=0;c<cols;c++) for(var r=0;r<rows;r++){
-    if(cstr((g[r]||[])[c])!=='사회') continue;
-    var dt=findDate(g,r,c); if(!dt) continue;
+  for(var c=0;c<cols;c++){ var colBlocks=[]; for(var r=0;r<rows;r++){
+    if(cstr((g[r]||[])[c]).replace(/\s+/g,'')!=='사회') continue;
+    var dt=findDate(g,r,c);
     var items=[];
     for(var rr=r; rr<rows; rr++){
-      var t=cstr((g[rr]||[])[c]); if(rr>r && t==='사회') break;
+      var t=cstr((g[rr]||[])[c]); if(rr>r && t.replace(/\s+/g,'')==='사회') break;
       if(!t) continue;
       items.push({title:t, name:cstr((g[rr]||[])[c+1]), asst:cstr((g[rr]||[])[c+2])});
       if(/마치는\s*기도/.test(t)) break;
     }
-    out.push({m:dt[0], d:dt[1], items:items});
+    colBlocks.push({m:dt?dt[0]:null, d:dt?dt[1]:null, items:items});
   }
+  // 날짜를 못 읽은 주(사진 인식 등)는 앞뒤 주에서 7일씩 계산
+  var shift=function(m,d,days){ var t=new Date(Date.UTC(2000,m-1,d+days)); return [t.getUTCMonth()+1, t.getUTCDate()]; };
+  for(var pass=0; pass<colBlocks.length; pass++) colBlocks.forEach(function(b,i){
+    if(b.m) return; var pr=colBlocks[i-1], nx=colBlocks[i+1], v=null;
+    if(pr && pr.m) v=shift(pr.m,pr.d,7); else if(nx && nx.m) v=shift(nx.m,nx.d,-7);
+    if(v){ b.m=v[0]; b.d=v[1]; b.guessDate=true; } });
+  colBlocks.forEach(function(b){ if(b.m) out.push(b); }); }
   return out;
 }
 function s2Known(t){ var n=splitTitle(t).name.replace(/^\d+\s*[.)]\s*/,''); return /^연설/.test(n) || S2_PRESETS.some(function(x){ return x[0]===n; }); }
@@ -1207,7 +1214,7 @@ function buildImportedWeek(date, items, nameId){
   var id=function(n){ n=(n||'').replace(/\s+/g,''); if(!n) return null; return nameId[n]||('txt:'+n); };
   items.forEach(function(it){
     var t=it.title.replace(/^\d+\s*[.)]\s*/,''), nm=id(it.name), as=id(it.asst), p;
-    if(t==='사회'){ chair=Sx.makePart('chair','사회'); chair.main=nm; chair.lock={main:true,asst:true}; parts.push(chair); return; }
+    if(t.replace(/\s+/g,'')==='사회'){ chair=Sx.makePart('chair','사회'); chair.main=nm; chair.lock={main:true,asst:true}; parts.push(chair); return; }
     if(/시작\s*기도/.test(t)){ if(chair && nm && nm!==chair.main) chair.openPrayer=nm; return; }
     if(/마치는\s*기도/.test(t)) p=Sx.makePart('prayer','마치는 기도');
     else if(/영적\s*보물/.test(t)) p=Sx.makePart('gems',t);
