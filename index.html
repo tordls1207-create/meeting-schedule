@@ -291,6 +291,8 @@ table.plist td .na{color:var(--line)}
 .sgrid.stud .gn.asn.hi{color:var(--accent-fg);font-weight:700}
 .sgrid.stud .none{color:var(--faint);font-size:11px}
 .sgrid.stud th{text-align:center}
+.sgrid.full td{text-align:center}
+.sgrid.full td.sc,.sgrid.full th.scg{background:color-mix(in srgb, var(--sec2) 7%, transparent)}
 .sgrid.stud td.sc{text-align:center;min-width:150px}
 /* 가운데 점(·)이 칸 한가운데 오도록: 실연은 점 왼쪽, 보조자는 점 오른쪽 */
 .sgrid.stud .pair{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:2px;white-space:nowrap;width:100%}
@@ -1145,6 +1147,33 @@ function renderExport(){
     '<footer><button class="btn primary" data-act="copyText">복사</button><span class="spacer"></span><button class="btn" data-act="closeExport">닫기</button></footer></div></div>';
 }
 
+/* 통계 · 전체 표: 주별 표와 학생 과제를 한 표로 (사회 … 낭독 | 과제 4·5·6번 | 생활 … 마치는 기도) */
+function renderFullGrid(keys){
+  var hi=ui.statHi, cnt=0, maxN=1;
+  keys.forEach(function(k){ D.months[k].weeks.forEach(function(w){ if(!w.skip){ var n=w.parts.filter(function(p){ return p.sec===2; }).length; if(n>maxN) maxN=n; } }); });
+  var cols=gridRoles(), before=cols.filter(function(c){ return ['chair','openPrayer','talk','gems','reading'].indexOf(c.key)>=0; }), after=cols.filter(function(c){ return before.indexOf(c)<0; });
+  var nb=function(x,cls){ var id=x.id||x; if(!id) return ''; if(id===hi && !x.imp) cnt++;
+    return '<button class="gn'+(id===hi?' hi':'')+(x.imp?' imp':'')+(cls?' '+cls:'')+'" data-act="statHi" data-v="'+esc(id)+'">'+esc(nameOf(id))+'</button>'; };
+  var span=before.length+maxN+after.length, body='';
+  keys.forEach(function(k){
+    body+='<tr class="mrow"><td class="nmcol">'+esc(mlabel(k))+'</td><td colspan="'+span+'"></td></tr>';
+    D.months[k].weeks.forEach(function(w){
+      if(w.skip){ body+='<tr><td class="nmcol"><b>'+wd(w.date)+'</b></td><td colspan="'+span+'" class="note" style="text-align:left">모임 없음'+(w.note?' · '+esc(w.note):'')+'</td></tr>'; return; }
+      var cell={}; w.parts.forEach(function(p){ Sx.SLOTS.forEach(function(s){ statKeysOf(p,s).forEach(function(x){ (cell[x.k]=cell[x.k]||[]).push({id:p[s], imp:x.imp}); }); }); });
+      var td=function(c){ return '<td>'+(cell[c.key]||[]).map(function(x){ return nb(x); }).join('')+'</td>'; };
+      var s2=w.parts.filter(function(p){ return p.sec===2; }), mid='';
+      for(var i=0;i<maxN;i++){ var p=s2[i], hasA=p&&Sx.slotRole(p,'asst')&&p.asst;
+        mid+='<td class="sc">'+(p?'<span class="pair'+(hasA?'':' solo')+'">'+nb(p.main)+(hasA?'<span class="sep">·</span>'+nb(p.asst,'asn'):'')+'</span>':'')+'</td>'; }
+      body+='<tr><td class="nmcol"><b>'+wd(w.date)+'</b></td>'+before.map(td).join('')+mid+after.map(td).join('')+'</tr>';
+    });
+  });
+  var head='<th class="nmcol">날짜</th>'+before.map(function(c){ return '<th>'+esc(c.label)+'</th>'; }).join('');
+  for(var i=1;i<=maxN;i++) head+='<th class="scg">과제 '+(i+3)+'번</th>';
+  head+=after.map(function(c){ return '<th>'+esc(c.label)+'</th>'; }).join('');
+  var h='<p class="hint">'+(hi?'<b>'+esc(nameOf(hi))+'</b> · 이 기간 '+cnt+'번 · 다시 누르면 표시가 꺼져요':'한 주의 모든 파트를 한 줄에 보여요. 과제 칸은 왼쪽이 실연, 오른쪽(흐린 글씨)이 보조자예요. 이름을 누르면 그 사람 칸이 모두 표시돼요.')+'</p>';
+  return h+'<div class="tablewrap tall"><table class="stat sgrid stud full"><thead><tr>'+head+'</tr></thead><tbody>'+body+'</tbody></table></div>';
+}
+
 /* 통계 · 학생 과제 표 (세로: 날짜, 가로: 봉사 파트 순서) */
 function renderStudentGrid(keys){
   var hi=ui.statHi, cnt=0, maxN=1;
@@ -1217,7 +1246,7 @@ function renderStats(){
   var view=ui.statView||'people', curM=ui.month&&D.months[ui.month]?ui.month:all[all.length-1];
   var range=keys.length===1?mlabel(keys[0]):mlabel(keys[0])+' ~ '+mlabel(keys[keys.length-1]);
   var h='<div class="statctl">';
-  h+='<div class="sc-row"><span class="sc-lab">보기</span><nav class="subtabs" role="tablist" aria-label="통계 보기" style="margin:0">'+[['people','사람별 횟수'],['grid','주별 표'],['student','학생 과제']].map(function(t){
+  h+='<div class="sc-row"><span class="sc-lab">보기</span><nav class="subtabs" role="tablist" aria-label="통계 보기" style="margin:0">'+[['people','사람별 횟수'],['grid','주별 표'],['student','학생 과제'],['full','전체']].map(function(t){
     return '<button role="tab" data-act="statView" data-v="'+t[0]+'" aria-selected="'+(view===t[0])+'">'+t[1]+'</button>'; }).join('')+'</nav></div>';
   h+='<div class="sc-row"><span class="sc-lab">기간</span><span class="seg gseg">'+[['1','이번 달'],['3','최근 3개월'],['6','최근 6개월'],['all','전체'],['custom','직접 고르기']].map(function(x){
     return '<button data-act="statPreset" data-v="'+x[0]+'" aria-pressed="'+(st.preset===x[0])+'">'+x[1]+'</button>'; }).join('')+'</span>';
@@ -1231,6 +1260,7 @@ function renderStats(){
   h+='</div>';
   if(view==='grid') return h+renderStatGrid(keys);
   if(view==='student') return h+renderStudentGrid(keys);
+  if(view==='full') return h+renderFullGrid(keys);
   // 집계
   var inK={}; keys.forEach(function(k){inK[k]=1});
   var by={}; D.people.forEach(function(p){ by[p.id]={p:p,total:0,role:{},last:null,list:[]}; });
