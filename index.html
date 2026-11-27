@@ -616,7 +616,7 @@ function applyProgram(w, pg){
   var keep=function(kind){ return take(function(p){ return p.kind===kind; }); };
   var out=[keep('chair')||Sx.makePart('chair','사회')];
   [['talk','연설'],['gems','영적 보물 찾기'],['reading','성경 낭독']].forEach(function(x,i){
-    var p=keep(x[0])||Sx.makePart(x[0],x[1]); p.title=joinTitle(x[1], (pg.s1&&pg.s1[i])||splitTitle(p.title).min); out.push(p); });
+    var p=keep(x[0])||Sx.makePart(x[0],x[1]); p.title=joinTitle(i===0&&pg.t1?pg.t1:x[1], (pg.s1&&pg.s1[i])||splitTitle(p.title).min); out.push(p); });
   (pg.s2||[]).forEach(function(it){ var kind=s2Kind(it[0]);
     var p=take(function(q){ return q.sec===2 && q.kind===kind; })||Sx.makePart(kind,'',2); p.title=joinTitle(it[0],it[1]); p.noAsst=false; out.push(p); });
   (pg.s3||[]).forEach(function(it){
@@ -633,8 +633,14 @@ function applyProgramsToMonth(k, onlyNew){
   if(onlyNew && monthState(M).confirmed) return 0;
   M.weeks.forEach(function(w){
     if(w.skip || w.edited) return;
-    if(onlyNew && (w.date<t || w.prog===mondayKey(w.date))) return;
     var pg=progFor(w); if(!pg) return;
+    if(onlyNew && w.date<t) return;
+    if(onlyNew && w.prog===mondayKey(w.date)){
+      // 이미 맞춘 주: 연설 주제만 새로 생겼으면 제목만 바꿈 (배정은 그대로)
+      var tk=w.parts.filter(function(q){return q.kind==='talk'})[0];
+      if(tk && pg.t1){ var nt=joinTitle(pg.t1,(pg.s1&&pg.s1[0])||10); if(tk.title!==nt){ tk.title=nt; n++; } }
+      return;
+    }
     applyProgram(w,pg); n++;
   });
   if(n && M.weeks.every(function(w){ return w.skip || w.prog || w.edited; })) M.ready=true;

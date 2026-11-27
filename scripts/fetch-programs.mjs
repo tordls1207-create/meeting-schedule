@@ -38,7 +38,7 @@ function parseWorkbook(html) {
   const heads = []; let m;
   while ((m = re.exec(art))) heads.push({ tag: m[1], t: text(m[3]), end: re.lastIndex });
   const SEC = { '성경에 담긴 보물': 1, '야외 봉사에 힘쓰십시오': 2, '그리스도인 생활': 3 };
-  const out = { s1: [], s2: [], s3: [], cbs: null, co: null };
+  const out = { t1: null, s1: [], s2: [], s3: [], cbs: null, co: null };
   let sec = 0;
   heads.forEach((h, i) => {
     if (h.tag === 'h2') { if (SEC[h.t]) sec = SEC[h.t]; return; }
@@ -48,7 +48,7 @@ function parseWorkbook(html) {
     const next = heads[i + 1] ? heads[i + 1].end : art.length;
     const mm = /\(\s*(\d+)\s*분\s*\)/.exec(text(art.slice(h.end, next)));
     const min = mm ? +mm[1] : null;
-    if (sec === 1) out.s1.push(min);
+    if (sec === 1) { if (!out.s1.length) out.t1 = name; out.s1.push(min); } // t1: 10분 연설 주제
     else if (sec === 2) out.s2.push([name, min]);
     else if (/회중 성서 연구/.test(name)) out.cbs = min || 30;
     else if (/봉사 강연/.test(name)) out.co = [name, min || 30];
@@ -67,7 +67,7 @@ for (let i = 0; i < LOOKAHEAD; i++) {
   const lastWeek = isoWeekOf(new Date(Date.UTC(y, 11, 28))).week;
   if (w > lastWeek) { w -= lastWeek; y += 1; }
   const monday = isoWeekMonday(y, w);
-  if (data.weeks[monday]) continue; // 이미 있음
+  if (data.weeks[monday] && data.weeks[monday].t1) continue; // 이미 있음
   try {
     const page = await get(`${BASE}/ko/wol/meetings/r8/lp-ko/${y}/${w}`);
     const link = /href="(\/ko\/wol\/d\/r8\/lp-ko\/\d+)"[^>]*class="[^"]*pub-mwb/.exec(page);
