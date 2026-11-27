@@ -270,6 +270,7 @@ table.plist td .na{color:var(--line)}
 .gn:hover{background:var(--surface-2)}
 .gn.hi{background:var(--accent);color:var(--accent-fg);font-weight:700}
 .fsbox{flex-direction:column;align-items:flex-start}
+.gtag{font-size:11px;border-radius:999px;padding:1px 7px;background:var(--warn-soft);color:var(--warn)}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;z-index:60}
 textarea.copy{width:100%;height:220px;font-size:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:8px}
 @media (prefers-reduced-motion:no-preference){.nm,.chip,.btn,.cand{transition:background-color .12s,border-color .12s}}
@@ -786,7 +787,7 @@ function setStatus(){
 function render(){
   var app=document.getElementById('app');
   var h='<header class="top"><h1>'+esc(D.settings.title||'그리스도인 생활과 봉사 계획표')+'<small>'+(D.settings.cong?esc(D.settings.cong)+' 회중 · ':'')+'임명표 자동 배정</small></h1><div class="status" id="status"></div></header>';
-  if(!livePeople().length && ui.tab!=='settings'){ app.innerHTML=h+renderWelcome(); setStatus(); return; }
+  if(!livePeople().length && ui.tab!=='settings'){ app.innerHTML=h+renderWelcome()+(ui.imp?renderImport():''); setStatus(); return; }
   h+='<nav class="tabs" role="tablist">'+[['people','명단'],['plan','계획표'],['stats','통계'],['settings','설정 · 백업']].map(function(t,i){
     return '<button role="tab" data-act="tab" data-v="'+t[0]+'" aria-selected="'+(ui.tab===t[0])+'"><span class="tno">'+(i+1)+'</span>'+t[1]+'</button>'; }).join('')+'</nav>';
   if(ui.tab==='plan') h+=renderPlan();
@@ -1239,6 +1240,29 @@ function importPreview(grid, year0){
   weeks.sort(function(a,b){ return a.date<b.date?-1:1; });
   return {weeks:weeks, unknown:Object.keys(unknown), total:total, matched:matched};
 }
+// 옛날 임명표에 나온 이름과, 그 사람이 했던 파트로 구분을 추측
+function inferRoster(grid){
+  var raw=parseGrid(grid), info={}, order=[];
+  var get=function(n){ if(!info[n]){ info[n]={roles:{},partners:[]}; order.push(n); } return info[n]; };
+  raw.forEach(function(x){
+    var wk=buildImportedWeek('2000-01-01', x.items, {}); if(!wk) return;
+    wk.parts.forEach(function(p){
+      Sx.SLOTS.forEach(function(s){ var v=p[s], r=Sx.slotRole(p,s); if(!v || !r || String(v).indexOf('txt:')!==0) return; get(String(v).slice(4)).roles[r]=1; });
+      if(p.kind==='demo' && p.main && p.asst){ var a=String(p.main).slice(4), b=String(p.asst).slice(4); get(a).partners.push(b); get(b).partners.push(a); }
+    });
+  });
+  var grp={};
+  order.forEach(function(n){ var r=info[n].roles;
+    grp[n]=(r.chair||r.cbs)?'elder':(r.talk||r.gems||r.living||r.prayer||r.cbsReader)?'ms':(r.reading||r.studentTalk)?'bro':null; });
+  // 학생 과제만 한 사람: 짝이 형제면 전도인, 아니면 자매
+  for(var k=0;k<4;k++) order.forEach(function(n){ if(grp[n]) return; if(info[n].partners.some(function(m){ return grp[m] && grp[m]!=='sis'; })) grp[n]='bro'; });
+  order.forEach(function(n){ if(!grp[n]) grp[n]='sis'; });
+  var ord={}; Sx.GROUPS.forEach(function(g,i){ ord[g.key]=i; });
+  var list=order.map(function(n){ return {name:n, group:grp[n]}; }).sort(function(a,b){ return (ord[a.group]-ord[b.group]) || a.name.localeCompare(b.name,'ko'); });
+  return {weeks:raw.length, list:list};
+}
+function monthAfterToday(){ var t=new Date(), y=t.getFullYear(), m=t.getMonth()+2; if(m>12){ m=1; y++; } return y+'-'+('0'+m).slice(-2); }
+
 function applyImport(weeks){
   var n=0;
   weeks.forEach(function(wk){
@@ -1261,12 +1285,24 @@ async function readImportFile(f){
 function renderImport(){
   var I=ui.imp, y=new Date().getFullYear(), pv=I.preview;
   var h='<div class="ov" data-act="closeImp"><div class="sheet wide" data-stop="1" role="dialog" aria-modal="true" aria-label="예전 임명표 가져오기">';
-  h+='<header><h3>예전 임명표 가져오기</h3><p>지난 임명표를 넣어 두면 자동 배정이 그 기록부터 이어서 공평하게 돌려요.</p></header><div class="wedbody">';
+  var start=I.mode==='start';
+  h+=start?'<header><h3>옛날 임명표로 시작하기</h3><p>옛날 임명표에 나온 이름으로 명단을 채우고, 그 기록부터 이어서 배정해요.</p></header><div class="wedbody">'
+          :'<header><h3>예전 임명표 가져오기</h3><p>지난 임명표를 넣어 두면 자동 배정이 그 기록부터 이어서 공평하게 돌려요.</p></header><div class="wedbody">';
   h+='<ol class="note" style="margin:0;padding-left:18px;line-height:1.7"><li>엑셀이나 구글 시트로 만든 예전 임명표를 열고, 표 전체를 드래그해서 <b>복사</b>하세요. (두 달이 옆으로 붙어 있어도 돼요)</li><li>아래 칸에 <b>붙여 넣거나</b>, 파일(.xlsx · .csv)을 그대로 고르세요.</li><li>몇 년도 임명표인지 고르고 <b>미리 보기</b>를 누르세요.</li></ol>';
   h+='<div class="frow"><label for="impYear">연도</label><select id="impYear" class="gsel">'+[y-2,y-1,y,y+1].map(function(v){ return '<option value="'+v+'"'+(v===I.year?' selected':'')+'>'+v+'년</option>'; }).join('')+'</select>'+
     '<label class="btn" for="impFile" style="margin-left:auto">파일 고르기</label><input type="file" id="impFile" accept=".xlsx,.xls,.csv,.tsv,.txt" hidden></div>';
   h+='<textarea id="impText" class="copy" style="height:150px" placeholder="여기에 붙여 넣기 (엑셀·구글 시트에서 복사)">'+esc(I.text||'')+'</textarea>';
-  if(pv){
+  var RS=I.roster;
+  if(start && RS){
+    if(!RS.list.length) h+='<div class="callout warn">임명표를 찾지 못했어요. “사회”, “마치는 기도” 같은 파트 이름과 날짜(예: 11/3)가 들어 있는 표를 복사했는지 확인해 주세요.</div>';
+    else {
+      var cg={}; RS.list.forEach(function(r){ cg[r.group]=(cg[r.group]||0)+1; });
+      h+='<div class="callout" style="flex-direction:column;align-items:flex-start"><b>'+RS.weeks+'주 기록에서 '+RS.list.length+'명을 찾았어요</b><span>'+Sx.GROUPS.map(function(g){ return g.label+' '+(cg[g.key]||0); }).join(' · ')+
+        ' (했던 파트로 추측했어요. 다음 화면에서 고칠 수 있어요)</span></div>';
+      h+='<div class="hist">'+RS.list.map(function(r){ return '<span>'+esc(r.name)+' · '+esc(Sx.GROUP[r.group].label)+'</span>'; }).join('')+'</div>';
+    }
+  }
+  if(!start && pv){
     if(!pv.weeks.length) h+='<div class="callout warn">임명표를 찾지 못했어요. “사회”, “마치는 기도” 같은 파트 이름과 날짜(예: 11/3)가 들어 있는 표를 복사했는지 확인해 주세요.</div>';
     else {
       var exist=pv.weeks.filter(function(w){ var M=D.months[w.date.slice(0,7)]; return M && M.weeks.some(function(x){ return x.date===w.date; }); }).length;
@@ -1278,7 +1314,8 @@ function renderImport(){
     }
   }
   h+='</div><footer><button class="btn" data-act="impPreview">미리 보기</button><span class="spacer"></span><button class="btn" data-act="closeImp">닫기</button>'+
-    '<button class="btn primary" data-act="impApply"'+(pv&&pv.weeks.length?'':' disabled')+'>'+(pv&&pv.weeks.length?pv.weeks.length+'주 가져오기':'가져오기')+'</button></footer></div></div>';
+    (start?'<button class="btn primary" data-act="impStart"'+(RS&&RS.list.length?'':' disabled')+'>'+(RS&&RS.list.length?RS.list.length+'명으로 명단 채우기':'명단 채우기')+'</button>'
+          :'<button class="btn primary" data-act="impApply"'+(pv&&pv.weeks.length?'':' disabled')+'>'+(pv&&pv.weeks.length?pv.weeks.length+'주 가져오기':'가져오기')+'</button>')+'</footer></div></div>';
   return h;
 }
 
@@ -1311,7 +1348,7 @@ function renderAddForm(ctx, title, pre, offset){
     var pr=ui.draftErr&&probs[i];
     h+='<div class="arow'+(pr?' err':'')+'"><span class="ano">'+(offset+i+1)+'</span><input type="text" id="dn'+i+'" data-act="dname" data-i="'+i+'" value="'+esc(r.name)+'" placeholder="이름" aria-label="'+(i+1)+'번째 이름" autocomplete="off">'+
       '<span class="seg gseg" role="group" aria-label="구분">'+Sx.GROUPS.map(function(g){ return '<button data-act="dgroup" data-i="'+i+'" data-v="'+g.key+'" aria-pressed="'+(r.group===g.key)+'">'+g.label+'</button>'; }).join('')+'</span>'+
-      '<button class="x" data-act="ddel" data-i="'+i+'" title="이 줄 지우기" aria-label="이 줄 지우기">×</button>'+(pr?'<span class="msg">'+esc(probs[i])+'</span>':'')+'</div>';
+      (r.guess?'<span class="gtag" title="했던 파트로 추측한 구분이에요">추측</span>':'')+'<button class="x" data-act="ddel" data-i="'+i+'" title="이 줄 지우기" aria-label="이 줄 지우기">×</button>'+(pr?'<span class="msg">'+esc(probs[i])+'</span>':'')+'</div>';
   });
   h+='<div class="formfoot"><button class="addline" data-act="dmore">＋ 한 명 더</button><span class="spacer"></span>'+
     '<button class="btn primary" data-act="dsubmit">'+(ctx==='welcome'?'명단 만들고 시작하기':'명단에 넣기')+(valid?' ('+valid+'명)':'')+'</button></div>';
@@ -1324,6 +1361,8 @@ function renderWelcome(){
   h+='<p>회중마다 이 파일을 따로 씁니다. 명단과 계획표는 이 컴퓨터의 브라우저에만 저장되고 다른 곳으로 보내지지 않아요.</p>';
   h+='<div class="field"><label for="wCong">회중 이름</label><input type="text" id="wCong" data-act="wcong" value="'+esc(ui.wcong||'')+'" placeholder="예: 서울 중앙" style="flex:1"></div>';
   h+='<div class="field"><label for="wWd">모임 요일</label><select id="wWd" data-act="wwd">'+WD.map(function(d,i){return '<option value="'+i+'"'+(i===(ui.wwd!=null?ui.wwd:2)?' selected':'')+'>'+d+'요일</option>'}).join('')+'</select></div></div>';
+  if(ui.pendingImport) h+='<div class="callout"><span>옛날 임명표에서 <b>'+ui.pendingImport.weeks+'주 기록</b>을 읽었어요. 아래 명단의 구분(“추측” 표시)이 맞는지 확인하고 <b>명단 만들고 시작하기</b>를 누르면 기록도 함께 들어가요.</span><button class="btn" data-act="impCancel">취소</button></div>';
+  else h+='<div class="callout"><span>예전에 쓰던 임명표(엑셀·구글 시트)가 있으면 이름을 하나하나 칠 필요 없어요.</span><button class="btn primary" data-act="impStartOpen">옛날 임명표로 시작하기</button></div>';
   h+=renderAddForm('welcome','명단 넣기 · 이름을 적고 구분을 누르세요');
   h+='<div class="bar"><span class="note">이미 쓰던 파일이 있나요?</span>'+(FS.ok?'<button class="btn" data-act="fsOpen">자동 저장 파일 열기</button>':'')+'<label class="btn" for="restoreFile">백업 파일 불러오기</label><input type="file" id="restoreFile" accept=".json,application/json" data-act="restore" hidden></div></div>';
   return h;
@@ -1573,7 +1612,7 @@ document.addEventListener('click', function(ev){
   if(/^wed(Type|Who|Del|Add)$/.test(a) && ui.wed!=null && M && M.weeks[ui.wed]) M.weeks[ui.wed].edited=true;
   switch(a){
     case 'tab': ui.tab=el.dataset.v; ui.confirm=null; ui.justAdded=null; ui.wed=null; if(ui.tab!=='people') ui.started=false; break;
-    case 'dgroup': ui.draft[+el.dataset.i].group=el.dataset.v; break;
+    case 'dgroup': ui.draft[+el.dataset.i].group=el.dataset.v; ui.draft[+el.dataset.i].guess=false; break;
     case 'ddel': ui.draft.splice(+el.dataset.i,1); if(!ui.draft.length) ui.draft.push({name:'',group:null}); break;
     case 'dmore': ui.draft.push({name:'',group:null}); render(); var nf=document.getElementById('dn'+(ui.draft.length-1)); if(nf) nf.focus(); return;
     case 'dsubmit':
@@ -1587,10 +1626,13 @@ document.addEventListener('click', function(ev){
       ui.justAdded={}; newP.forEach(function(q){ ui.justAdded[q.id]=1; });
       if(welcome){
         // 명단을 넣으면 바로 다음 달 계획표 만들기로 넘어감
-        if(!monthKeys().length){ var k1=nextMonthKey(), p1=k1.split('-'); D.months[k1]=Sx.makeMonth(+p1[0],+p1[1],D.settings.weekday); applyProgramsToMonth(k1,false); }
-        ui.month=monthKeys().slice(-1)[0]; ui.tab='plan'; ui.wed=null; ui.confirm=null; ui.fsHint=true;
+        var impN=0;
+        if(ui.pendingImport){ var pvS=importPreview(ui.pendingImport.grid, ui.pendingImport.year); impN=applyImport(pvS.weeks); ui.pendingImport=null; }
+        var k1=monthAfterToday();
+        if(!D.months[k1]){ var p1=k1.split('-'); D.months[k1]=Sx.makeMonth(+p1[0],+p1[1],D.settings.weekday); applyProgramsToMonth(k1,false); }
+        ui.month=k1; ui.tab='plan'; ui.wed=null; ui.confirm=null; ui.fsHint=true;
         var rr=Sx.autoAssign(D, ui.month, {});
-        changed(); toast(rows.length+'명으로 '+mlabel(ui.month)+' 계획표를 만들었어요'+(rr.empty?' · 맡을 사람이 없어 '+rr.empty+'칸이 비었어요':'')); break;
+        changed(); toast(rows.length+'명'+(impN?', 지난 '+impN+'주 기록':'')+'으로 '+mlabel(ui.month)+' 계획표를 만들었어요'+(rr.empty?' · 맡을 사람이 없어 '+rr.empty+'칸이 비었어요':'')); break;
       }
       changed(); toast(rows.length+'명을 넣었어요. 다음 자동 배정부터 들어가요'); break;
     case 'rgroup':
@@ -1645,7 +1687,17 @@ document.addEventListener('click', function(ev){
       ui.imp.text=document.getElementById('impText').value; ui.imp.year=+document.getElementById('impYear').value;
       var gridP=ui.imp.text.trim()?parseTSV(ui.imp.text):ui.imp.grid;
       if(!gridP){ toast('표를 붙여 넣거나 파일을 골라 주세요'); return; }
-      ui.imp.preview=importPreview(gridP, ui.imp.year); break;
+      ui.imp.grid=gridP;
+      if(ui.imp.mode==='start') ui.imp.roster=inferRoster(gridP); else ui.imp.preview=importPreview(gridP, ui.imp.year); break;
+    case 'impCancel': ui.pendingImport=null; ui.draft=null; break;
+    case 'impStartOpen': ui.imp={mode:'start', year:new Date().getFullYear(), text:'', preview:null, grid:null, roster:null}; break;
+    case 'impStart':
+      ensureDraft('welcome',5);
+      var keepRows=ui.draft.filter(function(r){ return r.name.trim(); }), have={};
+      keepRows.forEach(function(r){ have[r.name.replace(/\s+/g,'')]=1; });
+      ui.draft=keepRows.concat(ui.imp.roster.list.filter(function(r){ return !have[r.name]; }).map(function(r){ return {name:r.name, group:r.group, guess:true}; }));
+      ui.pendingImport={grid:ui.imp.grid, year:ui.imp.year, weeks:ui.imp.roster.weeks};
+      toast(ui.imp.roster.list.length+'명을 명단에 채웠어요. 구분을 확인해 주세요'); ui.imp=null; break;
     case 'impApply':
       var impW=ui.imp.preview.weeks, nI=applyImport(impW), firstK=impW[0].date.slice(0,7), lastD=impW[impW.length-1].date, reN=0;
       // 가져온 기록 뒤의 아직 확정 안 한 달은 그 기록을 보고 다시 배정 (📌 고정 칸은 그대로)
@@ -1859,7 +1911,7 @@ function filterCands(){
 document.addEventListener('change', function(ev){
   var el=ev.target; if(el.id!=='impFile' || !el.files || !el.files[0] || !ui.imp) return;
   var f=el.files[0]; ui.imp.text=''; ui.imp.year=+document.getElementById('impYear').value;
-  readImportFile(f).then(function(g){ ui.imp.grid=g; ui.imp.preview=importPreview(g, ui.imp.year); render(); })
+  readImportFile(f).then(function(g){ ui.imp.grid=g; if(ui.imp.mode==='start') ui.imp.roster=inferRoster(g); else ui.imp.preview=importPreview(g, ui.imp.year); render(); })
     .catch(function(){ toast('파일을 읽지 못했어요. 엑셀에서 표를 복사해 붙여 넣어 보세요'); });
 });
 document.addEventListener('paste', function(ev){
