@@ -263,6 +263,11 @@ table.plist td .na{color:var(--line)}
 .sheet.confirm{max-width:400px}
 .sheet.confirm header p{font-size:13px;line-height:1.55;margin-top:6px}
 .btn.danger-fill{background:var(--warn);border-color:var(--warn);color:var(--surface);font-weight:700}
+.sgrid td{vertical-align:top;padding:4px}
+.sgrid tr.mrow td{background:var(--surface-2);font-family:var(--font-ui);font-weight:700;font-size:12px;color:var(--accent);text-align:left}
+.gn{display:block;border:0;background:none;padding:1px 4px;border-radius:4px;font-size:12px;white-space:nowrap;color:var(--fg);margin:0 auto}
+.gn:hover{background:var(--surface-2)}
+.gn.hi{background:var(--accent);color:var(--accent-fg);font-weight:700}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;z-index:60}
 textarea.copy{width:100%;height:220px;font-size:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:8px}
 @media (prefers-reduced-motion:no-preference){.nm,.chip,.btn,.cand{transition:background-color .12s,border-color .12s}}
@@ -506,8 +511,11 @@ textarea.copy{width:100%;height:220px;font-size:12px;border:1px solid var(--line
       st.person = p;
       st.eligible = ok;
       st.busy = !!used[p.id];
+      // 사람마다 정한 최소 간격(주) 안에 다른 배정이 있으면 뒤로 (사람이 모자라면 그래도 고름)
+      st.gap = p.minGap || 0;
+      st.gapShort = st.gap > 1 && st.dAny < st.gap * 7;
       st.jitter = rng ? rng() * 6 : 0;
-      st.total = st.score + st.jitter - (st.busy ? 1000 : 0) - (ok ? 0 : 2000);
+      st.total = st.score + st.jitter - (st.busy ? 1000 : 0) - (st.gapShort ? 500 : 0) - (ok ? 0 : 2000);
       out.push(st);
     });
     out.sort(function (a, b) { return b.total - a.total || a.person.name.localeCompare(b.person.name, 'ko'); });
@@ -559,7 +567,7 @@ textarea.copy{width:100%;height:220px;font-size:12px;border:1px solid var(--line
   }
 
   // 경고: 같은 주 중복, 성별, 자격 없음, 빈칸
-  function issues(data, week) {
+  function issues(data, week, events) {
     var pm = personMap(data);
     var out = {};
     var used = weekPids(week);
@@ -576,6 +584,7 @@ textarea.copy{width:100%;height:220px;font-size:12px;border:1px solid var(--line
         else if ((person.away || []).indexOf(week.date) >= 0) out[key] = '불참 날짜';
         else if ((person.roles || []).indexOf(role) < 0) out[key] = '자격 미체크';
         else if (slot === 'asst' && KINDS[p.kind].sameGender && p.main && pm[p.main] && pm[p.main].gender !== person.gender) out[key] = '성별 다름';
+        else if (events && person.minGap > 1 && events.some(function (e) { return e.pid === pid && e.date !== week.date && Math.abs(daysBetween(e.date, week.date)) < person.minGap * 7; })) out[key] = person.minGap + '주 간격 안 됨';
       });
     });
     return out;
@@ -800,7 +809,8 @@ function renderPlan(){
 }
 function monthState(M){
   var st={empty:0,warn:0,filled:0,locked:0};
-  M.weeks.forEach(function(w){ if(w.skip) return; var iss=Sx.issues(D,w);
+  var evAll=Sx.collectEvents(D);
+  M.weeks.forEach(function(w){ if(w.skip) return; var iss=Sx.issues(D,w,evAll);
     w.parts.forEach(function(p){ ['main','asst'].forEach(function(s){ if(!Sx.slotRole(p,s)) return; if(p[s]){st.filled++; if(p.lock&&p.lock[s]) st.locked++;} }); });
     Object.keys(iss).forEach(function(k){ if(iss[k]==='빈칸') st.empty++; else st.warn++; }); });
   st.ready=!!M.ready||st.filled>0;
@@ -822,7 +832,7 @@ function renderWeek(w,wi){
   var people=pm();
   var h='<section class="week'+(w.skip?' skip':'')+'" aria-label="'+md(w.date)+'">';
   if(w.skip){ return h+'<div class="grid"><div class="c date" style="grid-row:auto">'+dateBtn(w,wi)+'</div><div class="skipmsg" style="grid-column:2/-1">모임 없음'+(w.note?' · '+esc(w.note):'')+'</div></div></section>'; }
-  var iss=Sx.issues(D,w);
+  var iss=Sx.issues(D,w,Sx.collectEvents(D));
   h+='<div class="grid">';
   var n=0, lastSec=null, chairDone=false;
   w.parts.forEach(function(p,pi){
@@ -967,8 +977,9 @@ function renderPicker(){
   var bestShown=false;
   list.forEach(function(c){
     var tags='';
-    if(!bestShown && c.eligible && !c.busy){ tags+='<span class="tag best">추천</span>'; bestShown=true; }
+    if(!bestShown && c.eligible && !c.busy && !c.gapShort){ tags+='<span class="tag best">추천</span>'; bestShown=true; }
     if(c.busy) tags+='<span class="tag w">이번 주 다른 배정</span>';
+    else if(c.gapShort) tags+='<span class="tag w">'+c.gap+'주 간격 안 됨</span>';
     if(!c.eligible) tags+='<span class="tag w">자격 밖</span>';
     var meta=[];
     meta.push(c.lastRole?'이 역할 '+weeksAgo(c.lastRole,w.date)+' ('+md(c.lastRole)+')':'이 역할 기록 없음');
@@ -1004,6 +1015,26 @@ function renderExport(){
     '<footer><button class="btn primary" data-act="copyText">복사</button><span class="spacer"></span><button class="btn" data-act="closeExport">닫기</button></footer></div></div>';
 }
 
+/* 통계 · 주별 표 (세로: 날짜, 가로: 파트) */
+function renderStatGrid(keys){
+  var hi=ui.statHi, cnt=0, h='';
+  var body='';
+  keys.forEach(function(k){
+    body+='<tr class="mrow"><td class="nmcol">'+esc(mlabel(k))+'</td><td colspan="'+Sx.ROLES.length+'"></td></tr>';
+    D.months[k].weeks.forEach(function(w){
+      if(w.skip){ body+='<tr><td class="nmcol"><b>'+md(w.date)+'</b></td><td colspan="'+Sx.ROLES.length+'" class="note" style="text-align:left">모임 없음'+(w.note?' · '+esc(w.note):'')+'</td></tr>'; return; }
+      var cell={};
+      w.parts.forEach(function(p){ Sx.SLOTS.forEach(function(s){ var r=Sx.slotRole(p,s); if(!r||!p[s]) return; (cell[r]=cell[r]||[]).push(p[s]); }); });
+      body+='<tr><td class="nmcol"><b>'+md(w.date)+'</b></td>'+Sx.ROLES.map(function(r){
+        return '<td>'+(cell[r.key]||[]).map(function(id){ if(id===hi) cnt++;
+          return '<button class="gn'+(id===hi?' hi':'')+'" data-act="statHi" data-v="'+esc(id)+'">'+esc(nameOf(id))+'</button>'; }).join('')+'</td>'; }).join('')+'</tr>';
+    });
+  });
+  h+='<p class="hint">'+(hi?'<b>'+esc(nameOf(hi))+'</b> · 이 기간 '+cnt+'번 · 다시 누르면 표시가 꺼져요':'이름을 누르면 그 사람이 맡은 칸이 모두 표시돼요.')+'</p>';
+  h+='<div class="tablewrap"><table class="stat sgrid"><thead><tr><th class="nmcol">날짜</th>'+Sx.ROLES.map(function(r){ return '<th>'+esc(ROLE_SHORT[r.key])+'</th>'; }).join('')+'</tr></thead><tbody>'+body+'</tbody></table></div>';
+  return h;
+}
+
 /* 통계 */
 var ROLE_SHORT={chair:'사회',talk:'연설',gems:'보물',reading:'낭독',student:'학생',assistant:'보조',studentTalk:'학생 연설',living:'생활',cbs:'연구 사회',cbsReader:'연구 낭독',prayer:'기도'};
 function statKeys(){
@@ -1017,10 +1048,13 @@ function statKeys(){
 function renderStats(){
   var keys=statKeys(), all=monthKeys(), st=ui.stat;
   if(!all.length) return '<div class="callout">아직 계획표가 없어요. 계획표 탭에서 달을 추가하고 배정하면 여기에 횟수가 쌓여요.</div>';
-  var h='<div class="bar">'+[['1','선택한 달'],['3','최근 3개월'],['6','최근 6개월'],['all','전체']].map(function(x){
+  var sub='<nav class="subtabs" role="tablist" aria-label="통계 보기">'+[['people','사람별 횟수'],['grid','주별 표']].map(function(t){
+    return '<button role="tab" data-act="statView" data-v="'+t[0]+'" aria-selected="'+((ui.statView||'people')===t[0])+'">'+t[1]+'</button>'; }).join('')+'</nav>';
+  var h=sub+'<div class="bar">'+[['1','선택한 달'],['3','최근 3개월'],['6','최근 6개월'],['all','전체']].map(function(x){
     return '<button class="chip" data-act="statPreset" data-v="'+x[0]+'" aria-pressed="'+(st.preset===x[0])+'">'+x[1]+'</button>'; }).join('');
   var opt=function(sel){ return all.map(function(k){return '<option value="'+k+'"'+(k===sel?' selected':'')+'>'+mlabel(k)+'</option>'}).join(''); };
   h+='<span class="note" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap"><select data-act="statFrom" class="gsel" aria-label="시작 달">'+opt(keys[0])+'</select>부터<select data-act="statTo" class="gsel" aria-label="끝 달">'+opt(keys[keys.length-1])+'</select>까지</span></div>';
+  if(ui.statView==='grid') return h+renderStatGrid(keys);
   h+='<div class="bar">'+[['','전체']].concat(Sx.GROUPS.map(function(g){return [g.key,g.label]})).map(function(x){
     return '<button class="chip" data-act="statGroup" data-v="'+x[0]+'" aria-pressed="'+(st.group===x[0])+'">'+x[1]+'</button>'; }).join('')+'</div>';
   // 집계
@@ -1168,14 +1202,16 @@ function renderPeople(){
     if(e.date<t && (!last[e.pid]||e.date>last[e.pid])) last[e.pid]=e.date;
     if(e.date>=t && (!next[e.pid]||e.date<next[e.pid])) next[e.pid]=e.date; });
   live=sortedLive();
+  h+='<p class="hint">“최소 간격”을 3주로 하면 그 사람은 적어도 3주가 지나야 다시 배정돼요. 사람이 모자랄 때만 예외로 들어가고, 그 칸은 주황색으로 표시돼요.</p>';
   h+='<p class="hint">칸을 눌러 ✓를 켜고 끄면 그 사람이 맡을 수 있는 파트가 바뀌어요. 구분을 다시 고르면 기본값으로 돌아가요.</p>';
   h+='<p class="hint">'+live.length+'명 · “배정”을 끄면 그 사람은 자동 배정에서 빠져요 (아프거나 멀리 갔을 때).</p>';
-  h+='<div class="tablewrap"><table class="stat plist"><thead><tr><th class="nmcol">이름</th><th>구분</th><th>배정</th>'+Sx.ROLES.map(function(r){return '<th class="rc">'+esc(ROLE_SHORT[r.key])+'</th>';}).join('')+'<th>앞뒤 3개월</th><th>지난 배정</th><th>다음 배정</th></tr></thead><tbody>';
+  h+='<div class="tablewrap"><table class="stat plist"><thead><tr><th class="nmcol">이름</th><th>구분</th><th>배정</th><th>최소 간격</th>'+Sx.ROLES.map(function(r){return '<th class="rc">'+esc(ROLE_SHORT[r.key])+'</th>';}).join('')+'<th>앞뒤 3개월</th><th>지난 배정</th><th>다음 배정</th></tr></thead><tbody>';
   live.forEach(function(p,n){
     var i=D.people.indexOf(p);
     h+='<tr'+(p.active===false?' class="off"':'')+'><td class="nmcol"><span class="note" style="margin-right:6px">'+(n+1)+'</span><b>'+esc(p.name)+'</b></td>'+
       '<td>'+esc(Sx.GROUP[Sx.groupOf(p)].label)+'</td>'+
       '<td><label class="sw"><input type="checkbox" data-act="pactive" data-i="'+i+'"'+(p.active!==false?' checked':'')+' aria-label="'+esc(p.name)+' 배정"> '+(p.active!==false?'함':'안 함')+'</label></td>'+
+      '<td><select class="gsel" data-act="pgap" data-i="'+i+'" aria-label="'+esc(p.name)+' 최소 간격">'+[0,2,3,4,5,6,8].map(function(g){ return '<option value="'+g+'"'+((p.minGap||0)===g?' selected':'')+'>'+(g?g+'주마다':'제한 없음')+'</option>'; }).join('')+'</select></td>'+
       Sx.ROLES.map(function(r){ var on=(p.roles||[]).indexOf(r.key)>=0, dis=r.male&&p.gender!=='M';
         return '<td class="rc">'+(dis?'<span class="na" title="형제만">–</span>':'<button class="rt" data-act="prole" data-i="'+i+'" data-v="'+r.key+'" aria-pressed="'+on+'" aria-label="'+esc(p.name+' '+r.label)+'">'+(on?'✓':'')+'</button>')+'</td>'; }).join('')+
       '<td>'+(cnt[p.id]||0)+'회</td><td class="note">'+(last[p.id]?md(last[p.id]):'—')+'</td><td class="note">'+(next[p.id]?md(next[p.id]):'—')+'</td></tr>';
@@ -1437,6 +1473,8 @@ document.addEventListener('click', function(ev){
     case 'statSort': var sv=el.dataset.v; if(ui.stat.sort===sv) ui.stat.dir=-ui.stat.dir; else { ui.stat.sort=sv; ui.stat.dir=sv==='name'?1:-1; } break;
     case 'statRow': ui.stat.open=ui.stat.open===el.dataset.v?null:el.dataset.v; break;
     case 'statZero': ui.stat.zeroOpen=!ui.stat.zeroOpen; break;
+    case 'statView': ui.statView=el.dataset.v; break;
+    case 'statHi': ui.statHi=ui.statHi===el.dataset.v?null:el.dataset.v; break;
     case 'delMonth': ui.modal='delMonth'; break;
     case 'clearMonth': ui.modal='clearMonth'; break;
     case 'closeModal': ui.modal=null; break;
@@ -1544,6 +1582,7 @@ document.addEventListener('change', function(ev){
     case 'wnote': M.weeks[+el.dataset.w].note=el.value; changed(); return;
     case 'pname': D.people[+el.dataset.i].name=el.value.trim()||D.people[+el.dataset.i].name; break;
     case 'pactive': D.people[+el.dataset.i].active=el.checked; break;
+    case 'pgap': D.people[+el.dataset.i].minGap=+el.value||0; break;
     case 'pgroup': var pg=D.people[+el.dataset.i], GG=Sx.GROUP[el.value]; pg.group=el.value; pg.gender=GG.gender; pg.roles=GG.roles.slice(); if(pg.note==='구분 확인 필요'||pg.note==='성별 확인 필요') pg.note=''; break;
     case 'setCong': D.settings.cong=el.value.trim(); break;
     case 'wwd': ui.wwd=+el.value; return;
