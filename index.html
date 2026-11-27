@@ -179,6 +179,9 @@ nav.tabs button[aria-selected="true"]{color:var(--accent);border-color:var(--acc
 .tile .v small{font-size:13px;font-weight:500;color:var(--muted);margin-left:4px}
 .tile button.link{border:0;background:none;padding:0;color:var(--accent);font-size:12px;text-decoration:underline}
 .tablewrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+.tablewrap.tall{max-height:calc(100vh - 150px);overflow:auto}
+.tablewrap.tall thead th{position:sticky;top:0;z-index:3;box-shadow:0 1px 0 var(--line)}
+.tablewrap.tall thead th.nmcol{z-index:4}
 table.stat{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
 table.stat th,table.stat td{padding:6px 8px;border-bottom:1px solid var(--line-soft);text-align:center;white-space:nowrap}
 table.stat th{font-size:12px;font-weight:600;color:var(--muted);background:var(--surface-2);position:sticky;top:0}
@@ -1111,7 +1114,7 @@ function renderStudentGrid(keys){
   });
   var h='<p class="hint">'+(hi?'<b>'+esc(nameOf(hi))+'</b> · 이 기간 학생 과제 '+cnt+'번 · 다시 누르면 표시가 꺼져요':'학생 과제만 따로 모았어요. 칸마다 왼쪽이 학생, 오른쪽(흐린 글씨)이 보조자예요. 이름을 누르면 그 사람 칸이 모두 표시돼요.')+'</p>';
   var head=''; for(var i=1;i<=maxN;i++) head+='<th>과제 '+(i+3)+'번</th>';
-  return h+'<div class="tablewrap"><table class="stat sgrid stud"><thead><tr><th class="nmcol">날짜</th>'+head+'</tr></thead><tbody>'+body+'</tbody></table></div>';
+  return h+'<div class="tablewrap tall"><table class="stat sgrid stud"><thead><tr><th class="nmcol">날짜</th>'+head+'</tr></thead><tbody>'+body+'</tbody></table></div>';
 }
 
 /* 통계 · 주별 표 (세로: 날짜, 가로: 파트) */
@@ -1132,7 +1135,7 @@ function renderStatGrid(keys){
     });
   });
   h+='<p class="hint">'+(hi?'<b>'+esc(nameOf(hi))+'</b> · 이 기간 '+cnt+'번 · 다시 누르면 표시가 꺼져요':'이름을 누르면 그 사람이 맡은 칸이 모두 표시돼요.')+'</p>';
-  h+='<div class="tablewrap"><table class="stat sgrid"><thead><tr><th class="nmcol">날짜</th>'+ROLES.map(function(r){ return '<th>'+esc(ROLE_SHORT[r.key])+'</th>'; }).join('')+'</tr></thead><tbody>'+body+'</tbody></table></div>';
+  h+='<div class="tablewrap tall"><table class="stat sgrid"><thead><tr><th class="nmcol">날짜</th>'+ROLES.map(function(r){ return '<th>'+esc(ROLE_SHORT[r.key])+'</th>'; }).join('')+'</tr></thead><tbody>'+body+'</tbody></table></div>';
   return h;
 }
 
@@ -1194,7 +1197,7 @@ function renderStats(){
   if(st.zeroOpen && zero.length) h+='<div class="callout">'+esc(zero.map(function(b){return b.p.name}).join(', '))+' · 이 기간에 배정이 없어요. 명단에서 구분이 맞는지, ‘자세히’에서 배정이 꺼져 있지 않은지 확인해 보세요.</div>';
   h+='<p class="hint">줄을 누르면 그 사람이 맡은 날짜와 파트가 나와요. 제목을 누르면 정렬돼요. 진한 칸일수록 그 역할을 많이 했다는 뜻이고, “–”는 자격이 없는 역할이에요.</p>';
   var th=function(key,label,cls){ return '<th'+(cls?' class="'+cls+'"':'')+'><button data-act="statSort" data-v="'+key+'"'+(sk===key?' aria-sort="'+(dir>0?'ascending':'descending')+'"':'')+'>'+label+(sk===key?(dir>0?' ▲':' ▼'):'')+'</button></th>'; };
-  h+='<div class="tablewrap"><table class="stat"><thead><tr>'+th('name','이름','nmcol')+'<th>구분</th>'+th('total','합계')+
+  h+='<div class="tablewrap tall"><table class="stat"><thead><tr>'+th('name','이름','nmcol')+'<th>구분</th>'+th('total','합계')+
     Sx.ROLES.map(function(r){return th(r.key,ROLE_SHORT[r.key])}).join('')+th('last','마지막')+'</tr></thead><tbody>';
   rows.forEach(function(b){
     var p=b.p, open=st.open===p.id;
@@ -1512,7 +1515,7 @@ function renderImport(){
 }
 
 function fsCallout(){
-  return '<div class="callout fsbox"><span><b>명단을 안전하게 보관하세요.</b> 자동 저장 파일을 정해 두면 고칠 때마다 그 파일에 저장돼요. 구글 드라이브·네이버 MYBOX·OneDrive처럼 동기화되는 폴더에 두면 인터넷에도 저절로 백업돼요.</span>'+
+  return '<div class="callout fsbox"><span><b>명단을 안전하게 보관하세요.</b> 자동 저장 파일을 정해 두면 고칠 때마다 그 파일에 저장돼요(컴퓨터의 크롬·엣지에서만 돼요). 구글 드라이브·네이버 MYBOX·OneDrive처럼 동기화되는 폴더에 두면 인터넷에도 저절로 백업돼요.</span>'+
     '<span class="bar" style="margin:0"><button class="btn primary" data-act="fsPick">자동 저장 파일 정하기</button><button class="btn" data-act="fsLater">나중에</button></span></div>';
 }
 
@@ -1592,6 +1595,9 @@ function renderPeople(){
     return '<button role="tab" data-act="pview" data-v="'+t[0]+'" aria-selected="'+((ui.pview||'list')===t[0])+'">'+t[1]+'</button>'; }).join('')+'</nav>';
   if((ui.pview||'list')==='list'){
     if(FS.ok && FS.state==='off' && !D.settings.fsLater) h+=fsCallout();
+    if(!FS.ok && STANDALONE && !ui.bkLater){ var lb2=D.settings.lastBackup; if(!lb2 || Sx.daysBetween(lb2.slice(0,10), today())>14)
+      h+='<div class="callout warn fsbox"><span><b>이 기기에서는 파일 자동 저장이 안 돼요</b> (컴퓨터의 크롬·엣지에서만 돼요). 명단과 계획표는 이 브라우저에만 남으니, 고친 뒤 <b>백업 파일</b>을 꼭 저장해 두세요. 마지막 백업: '+(lb2?esc(lb2.slice(0,10)):'없음')+'</span>'+
+        '<span class="bar" style="margin:0"><button class="btn primary" data-act="backup">지금 백업</button><button class="btn" data-act="bkLater">나중에</button></span></div>'; }
     h+='<div class="bar" style="margin-bottom:8px"><button class="btn" data-act="impStartOpen">옛날 임명표에서 이름 가져오기</button><span class="note">엑셀·구글 시트·PDF·사진에서 이름만 뽑아 아래에 채워요</span></div>';
     ensureDraft('people',1);
     h+=renderAddForm('people','명단 <span class="note" style="font-weight:500">'+live.length+'명 · '+Sx.GROUPS.map(function(g){return g.label+' '+(cntG[g.key]||0)}).join(' · ')+'</span>', pre, live.length);
@@ -1608,7 +1614,7 @@ function renderPeople(){
   h+='<p class="hint">“최소 간격”을 3주로 하면 그 사람은 적어도 3주가 지나야 다시 배정돼요. 사람이 모자랄 때만 예외로 들어가고, 그 칸은 주황색으로 표시돼요.</p>';
   h+='<p class="hint">칸을 눌러 ✓를 켜고 끄면 그 사람이 맡을 수 있는 파트가 바뀌어요. 구분을 다시 고르면 기본값으로 돌아가요.</p>';
   h+='<p class="hint">'+live.length+'명 · “배정”을 끄면 그 사람은 자동 배정에서 빠지고 파트 체크도 모두 꺼져요. 다시 켜면 원래 체크가 돌아와요.</p>';
-  h+='<div class="tablewrap"><table class="stat plist"><thead><tr><th class="nmcol">이름</th><th>구분</th><th>배정</th><th>최소 간격</th>'+Sx.ROLES.map(function(r){return '<th class="rc">'+esc(ROLE_SHORT[r.key])+'</th>';}).join('')+'</tr></thead><tbody>';
+  h+='<div class="tablewrap tall"><table class="stat plist"><thead><tr><th class="nmcol">이름</th><th>구분</th><th>배정</th><th>최소 간격</th>'+Sx.ROLES.map(function(r){return '<th class="rc">'+esc(ROLE_SHORT[r.key])+'</th>';}).join('')+'</tr></thead><tbody>';
   live.forEach(function(p,n){
     var i=D.people.indexOf(p);
     h+='<tr'+(p.active===false?' class="off"':'')+'><td class="nmcol"><span class="note" style="margin-right:6px">'+(n+1)+'</span><b>'+esc(p.name)+'</b></td>'+
@@ -1636,7 +1642,9 @@ function renderSettings(){
     '<li>직접 고른 칸과 확정한 달은 📌 고정돼서 다시 배정해도 바뀌지 않습니다.</li></ul></div>';
   h+='<div class="panel"><h2>예전 임명표 가져오기</h2><p>엑셀·구글 시트로 만든 지난 임명표를 복사해 넣거나 파일로 올리면, 자동 배정이 그 기록부터 이어서 순번을 돌려요.</p><div class="bar"><button class="btn primary" data-act="impOpen">예전 임명표 가져오기</button></div></div>';
   h+='<div class="panel"><h2>파일 자동 저장</h2>';
-  if(!FS.ok) h+='<p>이 기능은 컴퓨터의 <b>크롬</b>이나 <b>엣지</b>에서 사이트를 열었을 때만 쓸 수 있어요. 지금 브라우저에서는 아래 “백업 파일 저장”을 가끔 눌러 주세요.</p>';
+  h+='<div class="callout" style="flex-direction:column;align-items:flex-start;gap:4px"><span>✅ <b>컴퓨터의 크롬·엣지</b>에서만 쓸 수 있어요.</span><span>❌ <b>아이패드·아이폰·안드로이드 폰</b>, 그리고 사파리·파이어폭스에서는 안 돼요.</span>'+
+    '<span>그런 기기에서는 명단이나 계획표를 고친 뒤 아래 <b>“백업 파일 저장”</b>을 꼭 눌러 파일 앱·iCloud·구글 드라이브에 보관하세요. 기기를 바꾸면 “백업 불러오기”로 옮기면 돼요. 아이패드·폰은 사파리에서 <b>홈 화면에 추가</b>해서 쓰면 더 안전해요.</span></div>';
+  if(!FS.ok) h+='<p><b>지금 쓰는 기기·브라우저에서는 자동 저장이 안 돼요.</b> 아래 “백업 파일 저장”으로 직접 저장해 주세요.</p>';
   else if(FS.state==='off') h+='<p>파일을 한 번 정해 두면 명단이나 계획표를 고칠 때마다 그 파일에 자동으로 저장돼요. 브라우저 기록을 지우거나 컴퓨터를 바꿔도 그 파일을 “자동 저장 파일 열기”로 열면 그대로 이어서 쓸 수 있어요.</p><div class="bar"><button class="btn primary" data-act="fsPick">자동 저장 파일 정하기</button><button class="btn" data-act="fsOpen">자동 저장 파일 열기</button></div>';
   else h+='<p>'+(FS.state==='on'?'켜짐 · <b>'+esc(FS.name)+'</b> 파일에 자동으로 저장되고 있어요'+(FS.last?' (마지막 저장'+fsTime()+')':'')+'.':'멈춤 · <b>'+esc(FS.name)+'</b> 파일에 저장하려면 한 번 허락이 필요해요.')+'</p>'+
     '<div class="bar">'+(FS.state==='need'?'<button class="btn primary" data-act="fsResume">다시 켜기</button>':'')+'<button class="btn" data-act="fsPick">다른 파일로 바꾸기</button><button class="btn" data-act="fsOpen">다른 파일 열기</button><button class="btn danger" data-act="fsOff">자동 저장 끄기</button></div>';
@@ -1921,6 +1929,7 @@ document.addEventListener('click', function(ev){
       }
       var impW=pvA.weeks, nI=applyImport(impW), lastK=mondayKey(impW[impW.length-1].date).slice(0,7);
       ui.imp=null; ui.month=lastK; ui.tab='plan'; changed(); toast(nI+'주를 가져온 그대로 넣었어요'+(nF?' · '+(addLive?'명단에 '+nF+'명 추가':'그 당시 성원 '+nF+'명 기록'):'')+'. 앞으로 새로 짜는 달부터 이 기록을 보고 배정해요'); break;
+    case 'bkLater': ui.bkLater=true; break;
     case 'fsLater': ui.fsHint=false; D.settings.fsLater=true; changed(); break;
     case 'auto':
       var r=Sx.autoAssign(D, ui.month, {});
