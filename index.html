@@ -269,6 +269,7 @@ table.plist td .na{color:var(--line)}
 .gn{display:block;border:0;background:none;padding:1px 4px;border-radius:4px;font-size:12px;white-space:nowrap;color:var(--fg);margin:0 auto}
 .gn:hover{background:var(--surface-2)}
 .gn.hi{background:var(--accent);color:var(--accent-fg);font-weight:700}
+.fsbox{flex-direction:column;align-items:flex-start}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;z-index:60}
 textarea.copy{width:100%;height:220px;font-size:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:8px}
 @media (prefers-reduced-motion:no-preference){.nm,.chip,.btn,.cand{transition:background-color .12s,border-color .12s}}
@@ -687,6 +688,7 @@ async function load(){
   render();
   initCaps(dirty);
   loadPrograms();
+  fsInit();
 }
 async function initCaps(dirty){
   if(!window.claude || !window.claude.use){ save.mode='local'; setStatus(); return; }
@@ -697,11 +699,58 @@ async function initCaps(dirty){
   if(dirty) changed();
   render();
 }
+/* 파일 자동 저장 (크롬·엣지 컴퓨터): 한 번 파일을 정하면 고칠 때마다 그 파일에 저장 */
+var FS={ok: STANDALONE && typeof window.showSaveFilePicker==='function' && window.top===window, handle:null, state:'off', name:'', timer:null, last:null};
+var FS_TYPES=[{description:'임명표 데이터', accept:{'application/json':['.json']}}];
+function idbOpen(){ return new Promise(function(res,rej){ var r=indexedDB.open('cl-mw-fs',1); r.onupgradeneeded=function(){ r.result.createObjectStore('h'); }; r.onsuccess=function(){ res(r.result); }; r.onerror=function(){ rej(r.error); }; }); }
+async function idbSet(v){ try{ var db=await idbOpen(); await new Promise(function(res,rej){ var t=db.transaction('h','readwrite'); t.objectStore('h').put(v,'file'); t.oncomplete=res; t.onerror=function(){ rej(t.error); }; }); }catch(e){} }
+async function idbGet(){ try{ var db=await idbOpen(); return await new Promise(function(res){ var g=db.transaction('h','readonly').objectStore('h').get('file'); g.onsuccess=function(){ res(g.result||null); }; g.onerror=function(){ res(null); }; }); }catch(e){ return null; } }
+async function fsInit(){
+  if(!FS.ok) return;
+  try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
+  var h=await idbGet(); if(!h) return;
+  FS.handle=h; FS.name=h.name;
+  try{ FS.state=(await h.queryPermission({mode:'readwrite'}))==='granted'?'on':'need'; }catch(e){ FS.state='need'; }
+  render(); if(FS.state==='on') fsWrite();
+}
+async function fsPick(){
+  try{
+    var h=await window.showSaveFilePicker({suggestedName:'임명표-'+(D.settings.cong||'회중')+'-자동저장.json', types:FS_TYPES});
+    FS.handle=h; FS.name=h.name; FS.state='on'; await idbSet(h); await fsWrite();
+    ui.fsHint=false; toast('이제 고칠 때마다 '+h.name+' 파일에 자동으로 저장돼요');
+  }catch(e){ if(!(e&&e.name==='AbortError')) toast('파일을 정하지 못했어요'); }
+  render();
+}
+async function fsOpen(){
+  try{
+    var hs=await window.showOpenFilePicker({types:FS_TYPES}); var h=hs[0];
+    var nd=JSON.parse(await (await h.getFile()).text());
+    if(!nd || !Array.isArray(nd.people) || typeof nd.months!=='object') throw new Error('bad');
+    var perm='prompt'; try{ perm=await h.requestPermission({mode:'readwrite'}); }catch(e){}
+    D=nd; D.settings=D.settings||{weekday:2}; ui.month=monthKeys().slice(-1)[0]||null; ui.tab='plan'; ui.draft=null;
+    FS.handle=h; FS.name=h.name; FS.state=perm==='granted'?'on':'need'; await idbSet(h);
+    changed(); render(); toast(h.name+' 파일을 불러왔어요'+(FS.state==='on'?'. 앞으로 이 파일에 자동 저장돼요':''));
+  }catch(e){ if(!(e&&e.name==='AbortError')) toast('이 파일은 임명표 파일이 아니에요'); }
+}
+async function fsResume(){
+  try{ FS.state=(await FS.handle.requestPermission({mode:'readwrite'}))==='granted'?'on':'need'; if(FS.state==='on') await fsWrite(); }catch(e){}
+  render();
+}
+async function fsOff(){ FS.handle=null; FS.name=''; FS.state='off'; await idbSet(null); render(); toast('파일 자동 저장을 껐어요'); }
+function fsSchedule(){ if(FS.state!=='on') return; clearTimeout(FS.timer); FS.timer=setTimeout(fsWrite,1000); }
+async function fsWrite(){
+  if(!FS.handle || FS.state!=='on') return;
+  try{ var wr=await FS.handle.createWritable(); await wr.write(JSON.stringify(D,null,1)); await wr.close(); FS.last=new Date(); }
+  catch(e){ FS.state='need'; render(); return; }
+  setStatus();
+}
+function fsTime(){ if(!FS.last) return ''; var t=FS.last; return ' '+t.getHours()+':'+('0'+t.getMinutes()).slice(-2); }
+
 function changed(){
   D.savedAt = new Date().toISOString();
   var lsFail=false;
   try{ localStorage.setItem(LS_KEY, JSON.stringify(D)); }catch(e){ lsFail=true; }
-  if(save.mode!=='artifact'){ save.state='local'; setStatus(); if(lsFail) toast('이 브라우저는 저장을 막고 있어요. 백업 파일을 꼭 저장하세요'); return; }
+  if(save.mode!=='artifact'){ save.state='local'; fsSchedule(); setStatus(); if(lsFail && FS.state!=='on') toast('이 브라우저는 저장을 막고 있어요. 백업 파일을 꼭 저장하세요'); return; }
   save.state='dirty'; setStatus();
   clearTimeout(save.timer);
   save.timer=setTimeout(flush, 2500);
@@ -726,8 +775,10 @@ function setStatus(){
   var el=document.getElementById('status'); if(!el) return;
   var m={ok:['ok','저장됨'],dirty:['dirty','변경됨 · 곧 저장'],saving:['dirty','저장 중…'],err:['err','저장 실패 · 다시 시도해 주세요'],
     conflict:['err','다른 곳에서 먼저 저장됨 · 새로 불러오는 중'],local:['dirty','이 브라우저에만 저장됨']};
-  var s = save.mode==='local' ? (STANDALONE?['ok','이 컴퓨터에 저장됨']:m.local) : (m[save.state]||m.ok);
+  var s = save.mode==='local' ? (STANDALONE?(FS.state==='on'?['ok','파일에 자동 저장됨'+fsTime()]:FS.state==='need'?['dirty','파일 자동 저장 멈춤']:['ok','이 컴퓨터에 저장됨']):m.local) : (m[save.state]||m.ok);
   el.className='status '+s[0]; el.innerHTML='<i></i>'+esc(s[1]);
+  if(save.mode==='local' && FS.state==='need') el.innerHTML+=' <button class="btn" data-act="fsResume" style="padding:2px 8px">다시 켜기</button>';
+  if(FS.state==='on') el.title=FS.name;
   if(save.state==='err'){ el.innerHTML+=' <button class="btn" data-act="retry" style="padding:2px 8px">다시 저장</button>'; }
 }
 
@@ -780,15 +831,17 @@ function renderPlan(){
   }
   if(st.filled && !M.ready) h+='<div class="callout"><span>기본 파트 구성으로 자동 배정했어요. 교재와 다른 주가 있으면 날짜 아래 <b>✎ 고치기</b>로 맞춘 뒤 “다시 배정”을 누르세요.</span><button class="btn" data-act="readyOk">확인했어요</button></div>';
   h+='<p class="hint">이름을 누르면 추천 순서대로 후보가 나와요. 📌 표시는 고정된 칸이라 다시 배정해도 바뀌지 않아요.</p>';
-  if(save.mode==='local'){
+  if(save.mode==='local' && FS.state!=='on'){
     var lb=D.settings.lastBackup, old=!lb || Sx.daysBetween(lb.slice(0,10), today())>30;
     if(old) h+='<div class="callout warn"><span>명단과 계획표는 이 컴퓨터 브라우저에만 저장돼요. 브라우저 기록을 지우거나 컴퓨터를 바꾸면 사라지니 백업 파일을 저장해 두세요. 마지막 백업: '+(lb?esc(lb.slice(0,10)):'없음')+'</span><button class="btn" data-act="backup">지금 백업</button></div>';
   }
   // 위쪽 안내·보내기·단계는 “자세히 보기” 안으로
   var extra=h.slice(head.length);
-  var needBackup=save.mode==='local' && (!D.settings.lastBackup || Sx.daysBetween(D.settings.lastBackup.slice(0,10), today())>30);
+  var needBackup=save.mode==='local' && FS.state!=='on' && (!D.settings.lastBackup || Sx.daysBetween(D.settings.lastBackup.slice(0,10), today())>30);
   h=head.replace(/<\/div>$/, '<span class="spacer"></span><button class="chip" data-act="planMore" aria-expanded="'+!!ui.planMore+'">'+(ui.planMore?'접기 ▲':'자세히 보기 ▾')+(needBackup&&!ui.planMore?' <span class="dotw" title="백업 필요"></span>':'')+'</button></div>');
   if(ui.planMore) h+='<div class="more">'+extra+'</div>';
+  if(FS.ok && FS.state==='off' && ui.fsHint) h+=fsCallout();
+  if(FS.ok && FS.state==='need') h+='<div class="callout warn"><span>파일 자동 저장이 멈춰 있어요 ('+esc(FS.name)+'). 브라우저를 다시 열면 한 번 허락이 필요해요.</span><button class="btn primary" data-act="fsResume">다시 켜기</button></div>';
   h+='<div class="monthhead">'+mlabel(ui.month)+'</div><div class="weeks" style="margin-top:10px">';
   M.weeks.forEach(function(w,wi){ h+=renderWeek(w,wi); });
   h+='</div>';
@@ -1119,6 +1172,11 @@ function renderStats(){
   return h;
 }
 
+function fsCallout(){
+  return '<div class="callout fsbox"><span><b>명단을 안전하게 보관하세요.</b> 자동 저장 파일을 정해 두면 고칠 때마다 그 파일에 저장돼요. 구글 드라이브·네이버 MYBOX·OneDrive처럼 동기화되는 폴더에 두면 인터넷에도 저절로 백업돼요.</span>'+
+    '<span class="bar" style="margin:0"><button class="btn primary" data-act="fsPick">자동 저장 파일 정하기</button><button class="btn" data-act="fsLater">나중에</button></span></div>';
+}
+
 /* 사람 추가 양식 (처음 시작 화면과 명단 탭이 같이 씀) */
 function ensureDraft(ctx, rows){
   if(!ui.draft || ui.draftCtx!==ctx){ ui.draft=[]; for(var i=0;i<rows;i++) ui.draft.push({name:'',group:null}); ui.draftCtx=ctx; ui.draftErr=false; }
@@ -1157,7 +1215,7 @@ function renderWelcome(){
   h+='<div class="field"><label for="wCong">회중 이름</label><input type="text" id="wCong" data-act="wcong" value="'+esc(ui.wcong||'')+'" placeholder="예: 서울 중앙" style="flex:1"></div>';
   h+='<div class="field"><label for="wWd">모임 요일</label><select id="wWd" data-act="wwd">'+WD.map(function(d,i){return '<option value="'+i+'"'+(i===(ui.wwd!=null?ui.wwd:2)?' selected':'')+'>'+d+'요일</option>'}).join('')+'</select></div></div>';
   h+=renderAddForm('welcome','명단 넣기 · 이름을 적고 구분을 누르세요');
-  h+='<div class="bar"><span class="note">이미 쓰던 파일이 있나요?</span><label class="btn" for="restoreFile">백업 파일 불러오기</label><input type="file" id="restoreFile" accept=".json,application/json" data-act="restore" hidden></div></div>';
+  h+='<div class="bar"><span class="note">이미 쓰던 파일이 있나요?</span>'+(FS.ok?'<button class="btn" data-act="fsOpen">자동 저장 파일 열기</button>':'')+'<label class="btn" for="restoreFile">백업 파일 불러오기</label><input type="file" id="restoreFile" accept=".json,application/json" data-act="restore" hidden></div></div>';
   return h;
 }
 function peopleFrom(list){
@@ -1192,6 +1250,7 @@ function renderPeople(){
   var h='<nav class="subtabs" role="tablist" aria-label="명단 보기">'+[['list','명단'],['detail','자세히']].map(function(t){
     return '<button role="tab" data-act="pview" data-v="'+t[0]+'" aria-selected="'+((ui.pview||'list')===t[0])+'">'+t[1]+'</button>'; }).join('')+'</nav>';
   if((ui.pview||'list')==='list'){
+    if(FS.ok && FS.state==='off' && !D.settings.fsLater) h+=fsCallout();
     ensureDraft('people',1);
     h+=renderAddForm('people','명단 <span class="note" style="font-weight:500">'+live.length+'명 · '+Sx.GROUPS.map(function(g){return g.label+' '+(cntG[g.key]||0)}).join(' · ')+'</span>', pre, live.length);
     h+='<p class="hint">이름을 고치면 칸에서 나올 때 저장돼요. 구분에 따라 맡을 파트가 정해져요. 빼낸 사람은 앞으로의 배정에서 빠지고, 지난 기록은 남아요.</p>';
@@ -1233,6 +1292,12 @@ function renderSettings(){
     '<li>같은 주에 두 파트는 피합니다. 사람이 모자랄 때만 겹치고, 그때는 “같은 주 중복”으로 표시됩니다.</li>'+
     '<li>불참 날짜가 등록된 주에는 배정하지 않습니다.</li>'+
     '<li>직접 고른 칸과 확정한 달은 📌 고정돼서 다시 배정해도 바뀌지 않습니다.</li></ul></div>';
+  h+='<div class="panel"><h2>파일 자동 저장</h2>';
+  if(!FS.ok) h+='<p>이 기능은 컴퓨터의 <b>크롬</b>이나 <b>엣지</b>에서 사이트를 열었을 때만 쓸 수 있어요. 지금 브라우저에서는 아래 “백업 파일 저장”을 가끔 눌러 주세요.</p>';
+  else if(FS.state==='off') h+='<p>파일을 한 번 정해 두면 명단이나 계획표를 고칠 때마다 그 파일에 자동으로 저장돼요. 브라우저 기록을 지우거나 컴퓨터를 바꿔도 그 파일을 “자동 저장 파일 열기”로 열면 그대로 이어서 쓸 수 있어요.</p><div class="bar"><button class="btn primary" data-act="fsPick">자동 저장 파일 정하기</button><button class="btn" data-act="fsOpen">자동 저장 파일 열기</button></div>';
+  else h+='<p>'+(FS.state==='on'?'켜짐 · <b>'+esc(FS.name)+'</b> 파일에 자동으로 저장되고 있어요'+(FS.last?' (마지막 저장'+fsTime()+')':'')+'.':'멈춤 · <b>'+esc(FS.name)+'</b> 파일에 저장하려면 한 번 허락이 필요해요.')+'</p>'+
+    '<div class="bar">'+(FS.state==='need'?'<button class="btn primary" data-act="fsResume">다시 켜기</button>':'')+'<button class="btn" data-act="fsPick">다른 파일로 바꾸기</button><button class="btn" data-act="fsOpen">다른 파일 열기</button><button class="btn danger" data-act="fsOff">자동 저장 끄기</button></div>';
+  h+='</div>';
   h+='<div class="panel"><h2>백업</h2><p>모든 명단과 계획표를 파일 하나로 저장하거나 불러옵니다.</p><div class="bar">'+
     '<button class="btn" data-act="backup">백업 파일 저장</button><label class="btn" for="restoreFile" style="display:inline-block">백업 불러오기</label><input type="file" id="restoreFile" accept=".json,application/json" data-act="restore" hidden></div>'+
     (save.mode==='local'?'<p>변경 내용은 이 컴퓨터 브라우저에만 남아요. 다른 컴퓨터에서 쓰려면 백업 파일을 저장해서 그쪽에서 불러오세요.'+(D.settings.lastBackup?' 마지막 백업: '+esc(D.settings.lastBackup.slice(0,10)):'')+'</p>':'')+'</div>';
@@ -1412,7 +1477,7 @@ document.addEventListener('click', function(ev){
       if(welcome){
         // 명단을 넣으면 바로 다음 달 계획표 만들기로 넘어감
         if(!monthKeys().length){ var k1=nextMonthKey(), p1=k1.split('-'); D.months[k1]=Sx.makeMonth(+p1[0],+p1[1],D.settings.weekday); applyProgramsToMonth(k1,false); }
-        ui.month=monthKeys().slice(-1)[0]; ui.tab='plan'; ui.wed=null; ui.confirm=null;
+        ui.month=monthKeys().slice(-1)[0]; ui.tab='plan'; ui.wed=null; ui.confirm=null; ui.fsHint=true;
         var rr=Sx.autoAssign(D, ui.month, {});
         changed(); toast(rows.length+'명으로 '+mlabel(ui.month)+' 계획표를 만들었어요'+(rr.empty?' · 맡을 사람이 없어 '+rr.empty+'칸이 비었어요':'')); break;
       }
@@ -1459,6 +1524,11 @@ document.addEventListener('click', function(ev){
       var ra=Sx.autoAssign(D, k, {});
       changed(); toast(mlabel(k)+' 계획표를 만들었어요'+(pa?' · 교재 파트 '+pa+'주 반영':'')+(ra.empty?' · 맡을 사람이 없어 '+ra.empty+'칸이 비었어요':'')); break;
     case 'planMore': ui.planMore=!ui.planMore; break;
+    case 'fsPick': fsPick(); return;
+    case 'fsOpen': fsOpen(); return;
+    case 'fsResume': fsResume(); return;
+    case 'fsOff': fsOff(); return;
+    case 'fsLater': ui.fsHint=false; D.settings.fsLater=true; changed(); break;
     case 'auto':
       var r=Sx.autoAssign(D, ui.month, {});
       M.ready=true; changed(); toast(r.filled+'칸을 채웠어요'+(r.empty?' · 맡을 사람이 없어 '+r.empty+'칸이 비었어요':'')); break;
