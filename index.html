@@ -1266,9 +1266,19 @@ function renderStats(){
 function cstr(v){ return String(v==null?'':v).replace(/\s+/g,' ').trim(); }
 function parseTSV(text){ return String(text||'').replace(/\r/g,'').split('\n').map(function(l){ return l.split('\t'); }); }
 var DATE_RE=/^(\d{1,2})\s*(?:[\/.]|월)\s*(\d{1,2})\s*일?$/;
+// 날짜 칸 읽기: 7/1, 7월 1일, 7월 1-7일, 2025-07-01, 2025. 7. 1., 25.7.1, 7/1/2025, 엑셀 날짜 숫자 → [월, 일, 연도(있으면)]
+function parseDateCell(v){
+  var t=cstr(v).replace(/\([^)]*\)/g,' ').replace(/[(（][^)）]*$/,'').trim(); if(!t) return null;
+  var m, ok=function(mo,d){ return mo>=1&&mo<=12&&d>=1&&d<=31; }, yy=function(y){ y=+y; return y<100?2000+y:y; };
+  if((m=/^(20\d{2}|\d{2})\s*(?:[.\/\-]|년)\s*(\d{1,2})\s*(?:[.\/\-]|월)\s*(\d{1,2})\s*[.일]?(?:\s*[-~]\s*\d{1,2}\s*일?)?$/.exec(t)) && ok(+m[2],+m[3])) return [+m[2],+m[3],yy(m[1])];
+  if((m=/^(\d{1,2})\s*[\/\-]\s*(\d{1,2})\s*[\/\-]\s*(20\d{2}|\d{2})$/.exec(t)) && ok(+m[1],+m[2])) return [+m[1],+m[2],yy(m[3])];
+  if((m=/^(\d{1,2})\s*(?:[\/.]|월)\s*(\d{1,2})\s*일?(?:\s*[-~]\s*(?:\d{1,2}\s*월\s*)?\d{1,2}\s*일?)?\.?$/.exec(t)) && ok(+m[1],+m[2])) return [+m[1],+m[2]];
+  if(/^\d{5}(\.\d+)?$/.test(t)){ var n=Math.floor(+t); if(n>36000 && n<60000){ var dt=new Date(Date.UTC(1899,11,30+n)); return [dt.getUTCMonth()+1, dt.getUTCDate(), dt.getUTCFullYear()]; } }
+  return null;
+}
 function findDate(g,r,c){
-  var spots=[[r,c-1],[r,c-2],[r+1,c-1],[r-1,c-1]];
-  for(var i=0;i<spots.length;i++){ var rr=spots[i][0], cc=spots[i][1]; if(rr<0||cc<0||!g[rr]) continue; var m=DATE_RE.exec(cstr(g[rr][cc])); if(m) return [+m[1],+m[2]]; }
+  var spots=[[r,c-1],[r,c-2],[r+1,c-1],[r-1,c-1],[r-1,c],[r-2,c],[r-2,c-1],[r+1,c-2]];
+  for(var i=0;i<spots.length;i++){ var rr=spots[i][0], cc=spots[i][1]; if(rr<0||cc<0||!g[rr]) continue; var p=parseDateCell(g[rr][cc]); if(p) return p; }
   return null;
 }
 // 표 안에서 “사회” 칸을 찾아, 그 오른쪽은 담당·보조, 아래로 마치는 기도까지를 한 주로 읽음 (두 달이 옆으로 붙어 있어도 됨)
@@ -1334,10 +1344,14 @@ function parseGrid(g){
     if(limit<c+1) limit=c+1;
     var items=tRows.map(function(rr){ var row=g[rr]||[], nm=rowNames(row,c,limit);
       return {title:cstr(row[c]), name:nm.name, asst:nm.asst}; });
-    colBlocks.push({m:dt?dt[0]:null, d:dt?dt[1]:null, items:items});
+    colBlocks.push({m:dt?dt[0]:null, d:dt?dt[1]:null, y:dt&&dt[2]?dt[2]:null, items:items});
   }
   // 날짜를 못 읽은 주(사진 인식 등)는 앞뒤 주에서 7일씩 계산
   var shift=function(m,d,days){ var t=new Date(Date.UTC(2000,m-1,d+days)); return [t.getUTCMonth()+1, t.getUTCDate()]; };
+  var gap=function(a,b){ var x=Date.UTC(2000,a.m-1,a.d), z=Date.UTC(2000,b.m-1,b.d), dd=Math.round((z-x)/864e5); if(dd<-180) dd+=366; return dd; };
+  colBlocks.forEach(function(b,i){ var pr=colBlocks[i-1], nx=colBlocks[i+1];
+    if(!b.m || !pr || !pr.m || !nx || !nx.m) return;
+    if(gap(pr,nx)===14 && gap(pr,b)!==7){ var v=shift(pr.m,pr.d,7); b.m=v[0]; b.d=v[1]; b.y=null; b.guessDate=true; } });
   for(var pass=0; pass<colBlocks.length; pass++) colBlocks.forEach(function(b,i){
     if(b.m) return; var pr=colBlocks[i-1], nx=colBlocks[i+1], v=null;
     if(pr && pr.m) v=shift(pr.m,pr.d,7); else if(nx && nx.m) v=shift(nx.m,nx.d,-7);
@@ -1374,7 +1388,15 @@ function openModeOf(weeks){ var d=0, sm=0; weeks.forEach(function(w){ if(w._op==
 function detectYear(grid, raw){
   var cnt={};
   grid.forEach(function(r){ (r||[]).forEach(function(v){ var t=cstr(v), m, re=/(20\d{2})\s*년/g; while((m=re.exec(t))) cnt[m[1]]=(cnt[m[1]]||0)+1; }); });
-  var ys=Object.keys(cnt).sort(); if(ys.length) return {year:+ys[0], why:'표에 “'+ys[0]+'년”이 적혀 있어요'};
+  var withY=raw.filter(function(x){ return x.y; });
+  if(withY.length) return {year:withY[0].y - (withY[0].m<raw[0].m && raw[0].m-withY[0].m>6 ? 1 : 0), why:'날짜 칸에 연도가 적혀 있어요'};
+  var ys=Object.keys(cnt).sort(function(a,b){ return cnt[b]-cnt[a] || a-b; });
+  if(ys.length){
+    // 맨 처음 달과 함께 적힌 연도를 우선 (예: “2025년 7월”)
+    var firstY=null, fm=raw[0].m;
+    grid.some(function(r){ return (r||[]).some(function(v){ var mm=/(20\d{2})\s*년\s*(\d{1,2})\s*월/.exec(cstr(v)); if(mm && +mm[2]===fm){ firstY=+mm[1]; return true; } return false; }); });
+    var yy=firstY||+ys[0]; return {year:yy, why:'표에 “'+yy+'년'+(firstY?' '+fm+'월':'')+'”이 적혀 있어요'};
+  }
   var Y=new Date().getFullYear(), minM=raw[0].m, best=null, wkd=D.settings.weekday!=null?D.settings.weekday:2;
   [Y-3,Y-2,Y-1,Y,Y+1].forEach(function(y0){ var ok=0;
     raw.forEach(function(x){ var y=y0+(x.m<minM&&minM-x.m>6?1:0), wdN=new Date(Date.UTC(y,x.m-1,x.d)).getUTCDay(); if(wdN===wkd || wdN===1) ok++; });
@@ -1393,7 +1415,7 @@ function importPreview(grid, year0){
   var weeks=[], unknown={}, total=0, matched=0;
   raw.forEach(function(x){
     // 첫 달보다 앞 달(예: 12월 다음 1월)은 다음 해로 봄
-    var y=year0 + (x.m<minM && minM-x.m>6 ? 1 : 0);
+    var y=x.y || (year0 + (x.m<minM && minM-x.m>6 ? 1 : 0));
     var date=y+'-'+('0'+x.m).slice(-2)+'-'+('0'+x.d).slice(-2);
     var wk=buildImportedWeek(date, x.items, nameId); if(!wk) return;
     wk.parts.forEach(function(p){ Sx.SLOTS.forEach(function(s){ var v=p[s]; if(!v) return; total++; if(String(v).indexOf('txt:')===0) unknown[String(v).slice(4)]=1; else matched++; }); });
